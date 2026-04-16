@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CxA PTO Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#0f1117;color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    input,select,textarea{background:#12151f;border:1.5px solid #2a2d3e;border-radius:10px;color:#f1f5f9;padding:10px 14px;font-size:14px;outline:none;width:100%;transition:border-color .2s;font-family:inherit;}
+    input[type="date"]{cursor:pointer;}
+    input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.7) sepia(1) hue-rotate(200deg);cursor:pointer;}
+    input:focus,select:focus{border-color:#6366f1;box-shadow:0 0 0 3px #3730a355;}
+    input::placeholder{color:#475569;}
+    button{background:#21253a;border:1px solid #2a2d3e;border-radius:10px;color:#f1f5f9;padding:10px 18px;font-size:14px;cursor:pointer;transition:all .15s;font-family:inherit;}
+    button:hover{background:#2a2d45;border-color:#6366f155;}
+    button.primary{background:#6366f1;border-color:#6366f1;color:#fff;font-weight:500;}
+    button.primary:hover{background:#4f46e5;}
+    button.ghost{background:transparent;border-color:transparent;color:#94a3b8;}
+    button.ghost:hover{background:#21253a;color:#f1f5f9;}
+    button.danger{color:#ef4444;border-color:#7f1d1d;background:#7f1d1d33;}
+    button.danger:hover{background:#7f1d1d66;}
+    select option{background:#1a1d27;}
+    th.sortable{cursor:pointer;user-select:none;}
+    th.sortable:hover{color:#a5b4fc;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ─── Error boundary ───────────────────────────────────────────────────────────
+window.onerror = function(msg, src, line, col, err) {
+  document.getElementById('root').innerHTML =
+    '<div style="color:#ef4444;padding:2rem;font-family:monospace;font-size:14px;background:#0f1117;min-height:100vh">'
+    + '<h2 style="margin-bottom:1rem">Error loading app</h2><p>' + msg + '</p>'
+    + '<p>Line: ' + line + ', Col: ' + col + '</p>'
+    + '<pre>' + (err && err.stack ? err.stack : '') + '</pre></div>';
+  return true;
+};
+
+// ─── React destructure ────────────────────────────────────────────────────────
+const {createElement:h, useState, useEffect, useCallback, useMemo, Fragment} = React;
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://ykddpajaqftrcmmhizoq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Y-Jzj8i4_FDJeg6pRSOkpw_p7q1BGlE";
+
+async function dbGet() {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/pto_data?id=eq.main&select=data`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    const rows = await res.json();
+    return rows?.[0]?.data || null;
+  } catch(e) { console.error("dbGet error:", e); return null; }
+}
+
+async function dbSet(data) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/pto_data`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal"
+      },
+      body: JSON.stringify({ id: "main", data, updated_at: new Date().toISOString() })
+    });
+  } catch(e) { console.error("dbSet error:", e); }
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const DEFAULT_ADMIN_PIN = "1234";
+const ACCRUAL_RATES = [
+  { minYears:0, maxYears:4,        hoursPerYear:240 },
+  { minYears:4, maxYears:8,        hoursPerYear:256 },
+  { minYears:8, maxYears:Infinity, hoursPerYear:280 }
+];
+const ROLLOVER_CAP = 40;
+const MIN_PTO_HOURS = 0.10;
+
+const C = {
+  bg:"#0f1117", card:"#1a1d27", card2:"#21253a", border:"#2a2d3e",
+  accent:"#6366f1", accentDim:"#3730a3", accentText:"#a5b4fc",
+  green:"#10b981", greenDim:"#064e3b", greenText:"#6ee7b7",
+  amber:"#f59e0b", amberDim:"#78350f", amberText:"#fcd34d",
+  red:"#ef4444", redDim:"#7f1d1d", redText:"#fca5a5",
+  text:"#f1f5f9", textMid:"#94a3b8", textDim:"#475569"
+};
+
+// ─── Staff seed data ──────────────────────────────────────────────────────────
+const REAL_STAFF = [
+  {name:"Liza Boyle",         hireDate:"2023-10-23", weeklyHours:30, ptoOverride:null,  rolloverHours:47.98,  takenYTD:57.5},
+  {name:"Cathleen Branon-Keogh", hireDate:"2023-02-01", weeklyHours:40, ptoOverride:null, rolloverHours:8.16,  takenYTD:79},
+  {name:"Walker Calderwood",  hireDate:"2014-06-16", weeklyHours:40, ptoOverride:null,  rolloverHours:-6.49,  takenYTD:98.75},
+  {name:"Lauren Hagen",       hireDate:"2020-03-23", weeklyHours:32, ptoOverride:null,  rolloverHours:1.79,   takenYTD:36.75},
+  {name:"Eric Hauser",        hireDate:"2009-05-26", weeklyHours:40, ptoOverride:null,  rolloverHours:29.54,  takenYTD:23.5},
+  {name:"Riazul Hoque",       hireDate:"2023-03-13", weeklyHours:40, ptoOverride:null,  rolloverHours:-27.61, takenYTD:10.35},
+  {name:"Krystina Kattermann",hireDate:"2018-09-24", weeklyHours:40, ptoOverride:null,  rolloverHours:51.1,   takenYTD:20.45},
+  {name:"Michael LaCrosse",   hireDate:"2021-09-20", weeklyHours:40, ptoOverride:280,   rolloverHours:39.53,  takenYTD:27},
+  {name:"Charlie Maitland",   hireDate:"2024-05-28", weeklyHours:40, ptoOverride:null,  rolloverHours:23.65,  takenYTD:24},
+  {name:"Katie Mason",        hireDate:"2012-07-16", weeklyHours:40, ptoOverride:null,  rolloverHours:66.5,   takenYTD:69.75},
+  {name:"Sophia Mazzone",     hireDate:"2025-06-10", weeklyHours:40, ptoOverride:null,  rolloverHours:10.07,  takenYTD:48},
+  {name:"Eric Morrow",        hireDate:"2024-01-08", weeklyHours:40, ptoOverride:256,   rolloverHours:40,     takenYTD:71.8},
+  {name:"Carrie Napolitan",   hireDate:"2024-03-11", weeklyHours:28, ptoOverride:null,  rolloverHours:18.98,  takenYTD:12},
+  {name:"Rachael Straub",     hireDate:"2016-12-05", weeklyHours:40, ptoOverride:null,  rolloverHours:9.77,   takenYTD:12},
+  {name:"Alan Therrien",      hireDate:"2023-02-27", weeklyHours:40, ptoOverride:null,  rolloverHours:16.21,  takenYTD:10},
+  {name:"Daniel Tuhus-Dubrow",hireDate:"2017-03-02", weeklyHours:30, ptoOverride:null,  rolloverHours:-17.05, takenYTD:10.5},
+  {name:"Wil Yandell",        hireDate:"2026-01-12", weeklyHours:40, ptoOverride:256,   rolloverHours:0,      takenYTD:26.25},
+];
+
+function buildInitialStaff() {
+  const goLive = new Date().toISOString().split("T")[0];
+  return REAL_STAFF.map(s => ({
+    name: s.name, pin: null, hireDate: s.hireDate,
+    weeklyHours: s.weeklyHours, ptoOverride: s.ptoOverride,
+    rolloverHours: s.rolloverHours,
+    entries: s.takenYTD > 0
+      ? [{ id: Date.now() + Math.random(), type: "adjustment", date: goLive,
+           hours: -r2(s.takenYTD), note: "PTO taken prior to system go-live (imported)", addedBy: "admin" }]
+      : []
+  }));
+}
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+function getPTOYear(dateStr) {
+  const d = new Date(dateStr + "T12:00:00");
+  return (d.getMonth() === 0 && d.getDate() === 1) ? d.getFullYear() - 1 : d.getFullYear();
+}
+function currentPTOYear() {
+  const n = new Date();
+  return (n.getMonth() === 0 && n.getDate() === 1) ? n.getFullYear() - 1 : n.getFullYear();
+}
+function getAccrualRate(hireDate, ptoOverride) {
+  if (ptoOverride) return ptoOverride;
+  const years = (new Date() - new Date(hireDate)) / (1000*60*60*24*365.25);
+  return (ACCRUAL_RATES.find(r => years >= r.minYears && years < r.maxYears) || ACCRUAL_RATES[ACCRUAL_RATES.length-1]).hoursPerYear;
+}
+function weeklyAccrual(hireDate, weeklyHours, ptoOverride) {
+  return (getAccrualRate(hireDate, ptoOverride) / 52) * (weeklyHours / 40);
+}
+function calcAccruedInYear(hireDate, weeklyHours, year, ptoOverride) {
+  const now = new Date(), start = new Date(year, 0, 2);
+  const end = new Date(Math.min(now.getTime(), new Date(year+1, 0, 1).getTime()));
+  if (end <= start) return 0;
+  return ((end - start) / (1000*60*60*24*7)) * weeklyAccrual(hireDate, weeklyHours, ptoOverride);
+}
+function calcAccruedEOY(hireDate, weeklyHours, year, ptoOverride) {
+  const start = new Date(year, 0, 2), end = new Date(year+1, 0, 1);
+  return ((end - start) / (1000*60*60*24*7)) * weeklyAccrual(hireDate, weeklyHours, ptoOverride);
+}
+function countWeekdays(start, end) {
+  let c = 0;
+  const d = new Date(start + "T12:00:00"), e = new Date(end + "T12:00:00");
+  while (d <= e) { const dow = d.getDay(); if (dow !== 0 && dow !== 6) c++; d.setDate(d.getDate()+1); }
+  return c;
+}
+function hashPin(p) {
+  let hv = 0;
+  for (let i = 0; i < p.length; i++) hv = Math.imul(31, hv) + p.charCodeAt(i) | 0;
+  return hv.toString();
+}
+function initials(n) { return n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase(); }
+function avatarHue(name) {
+  let hv = 0;
+  for (let i = 0; i < name.length; i++) hv = Math.imul(31, hv) + name.charCodeAt(i) | 0;
+  return Math.abs(hv) % 360;
+}
+function yearProgress() {
+  const n = new Date(), s = new Date(n.getFullYear(), 0, 2), e = new Date(n.getFullYear()+1, 0, 1);
+  return Math.max(0, Math.min(1, (n-s)/(e-s)));
+}
+function r2(v) { return Math.round(v*100)/100; }
+function fmt(v) { return r2(Number(v)).toFixed(2); }
+function lastName(name) { const p = name.trim().split(" "); return p[p.length-1]; }
+
+function calcTakenYTD(emp) {
+  const now = new Date(), pty = currentPTOYear();
+  const taken = (emp.entries||[]).filter(e => e.type==="taken" && getPTOYear(e.date)===pty && new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0);
+  const negAdj = (emp.entries||[]).filter(e => e.type==="adjustment" && getPTOYear(e.date)===pty && e.hours<0).reduce((a,e)=>a+Math.abs(e.hours),0);
+  return r2(taken + negAdj);
+}
+
+// ─── Primitive UI helpers ─────────────────────────────────────────────────────
+function Avatar({name, size=36}) {
+  const hue = avatarHue(name);
+  return h('div', {
+    style: { width:size, height:size, borderRadius:"50%", background:`hsl(${hue},60%,18%)`,
+      border:`1.5px solid hsl(${hue},60%,35%)`, display:"flex", alignItems:"center",
+      justifyContent:"center", fontSize:size*.35, fontWeight:600,
+      color:`hsl(${hue},80%,75%)`, flexShrink:0 }
+  }, initials(name));
+}
+
+function Card({children, style={}}) {
+  return h('div', {
+    style: { background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"1.25rem", ...style }
+  }, children);
+}
+
+function Field({label, hint, children}) {
+  return h('div', { style:{marginBottom:14} },
+    h('label', { style:{fontSize:11,fontWeight:600,color:C.textMid,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"} }, label),
+    children,
+    hint && h('p', { style:{fontSize:11,color:C.textDim,margin:"4px 0 0"} }, hint)
+  );
+}
+
+function TopBar({title, sub, onSignOut, onChangePin}) {
+  return h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"} },
+    h('div', null,
+      h('h1', { style:{margin:0,fontSize:22,fontWeight:600,color:C.text,letterSpacing:"-0.02em"} }, title),
+      sub && h('p', { style:{margin:"2px 0 0",fontSize:13,color:C.textMid} }, sub)
+    ),
+    h('div', { style:{display:"flex",gap:8,alignItems:"center"} },
+      onChangePin && h('button', { className:"ghost", onClick:onChangePin, style:{fontSize:12,padding:"6px 10px"} }, "Change PIN"),
+      h('button', { className:"ghost", onClick:onSignOut, style:{fontSize:13} }, "← Sign out")
+    )
+  );
+}
+
+function AdminTabBar({active, onChange}) {
+  const tabs = [{id:"overview",label:"Overview"},{id:"manage",label:"Staff"},{id:"report",label:"Report"},{id:"calendar",label:"Calendar"},{id:"settings",label:"Settings"}];
+  return h('div', { style:{display:"flex",flexWrap:"wrap",gap:4,background:C.card2,borderRadius:12,padding:4,marginBottom:"1.25rem"} },
+    tabs.map(t => h('button', {
+      key: t.id, onClick: () => onChange(t.id),
+      style: { flex:"1 1 auto", padding:"8px 6px", borderRadius:9, fontSize:12,
+        fontWeight: active===t.id ? 500 : 400,
+        background: active===t.id ? C.card : "transparent",
+        border: active===t.id ? `1px solid ${C.border}` : "1px solid transparent",
+        color: active===t.id ? C.text : C.textMid, whiteSpace:"nowrap" }
+    }, t.label))
+  );
+}
+
+function EmpTabBar({active, onChange}) {
+  const tabs = [{id:"balance",label:"Balance"},{id:"log",label:"Log PTO"},{id:"history",label:"History"},{id:"calendar",label:"Calendar"}];
+  return h('div', { style:{display:"flex",gap:4,background:C.card2,borderRadius:12,padding:4,marginBottom:"1.25rem"} },
+    tabs.map(t => h('button', {
+      key: t.id, onClick: () => onChange(t.id),
+      style: { flex:1, padding:"8px 4px", borderRadius:9, fontSize:13,
+        fontWeight: active===t.id ? 500 : 400,
+        background: active===t.id ? C.card : "transparent",
+        border: active===t.id ? `1px solid ${C.border}` : "1px solid transparent",
+        color: active===t.id ? C.text : C.textMid }
+    }, t.label))
+  );
+}
+
+function SortTh({col, label, sortCol, sortDir, onSort}) {
+  const active = sortCol === col;
+  return h('th', {
+    className: "sortable", onClick: () => onSort(col),
+    style: { padding:"10px", textAlign:"left", fontWeight:600,
+      color: active ? C.accentText : C.textMid, fontSize:10,
+      whiteSpace:"nowrap", textTransform:"uppercase", letterSpacing:"0.05em" }
+  }, label, " ",
+    active
+      ? (sortDir==="asc" ? "↑" : "↓")
+      : h('span', { style:{opacity:.3} }, "↕")
+  );
+}
+
+function useSort(data, defaultCol, defaultDir="asc") {
+  const [col, setCol] = useState(defaultCol);
+  const [dir, setDir] = useState(defaultDir);
+  function onSort(c) {
+    if (c === col) setDir(d => d==="asc"?"desc":"asc");
+    else { setCol(c); setDir("asc"); }
+  }
+  const sorted = useMemo(() =>
+    [...data].sort((a,b) => {
+      let av = a[col], bv = b[col];
+      if (typeof av === "string") { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+      return dir==="asc" ? (av<bv?-1:av>bv?1:0) : (av>bv?-1:av<bv?1:0);
+    }), [data,col,dir]);
+  return { sorted, col, dir, onSort };
+}
+
+// ─── Donut chart ──────────────────────────────────────────────────────────────
+function Donut({value, max, label, sub, color=C.accent, size=150}) {
+  const pct = Math.min(1, Math.max(0, max>0 ? value/max : 0));
+  const r=48, cx=60, cy=60, sw=11, circ=2*Math.PI*r;
+  return h('div', { style:{textAlign:"center"} },
+    h('svg', { width:size, height:size, viewBox:"0 0 120 120" },
+      h('circle', { cx, cy, r, fill:"none", stroke:C.card2, strokeWidth:sw }),
+      h('circle', { cx, cy, r, fill:"none", stroke:color, strokeWidth:sw,
+        strokeDasharray:`${pct*circ} ${circ}`, strokeLinecap:"round",
+        transform:`rotate(-90 ${cx} ${cy})` }),
+      h('text', { x:cx, y:cy-6, textAnchor:"middle", fontSize:"16", fontWeight:"700", fill:C.text }, fmt(value)),
+      h('text', { x:cx, y:cy+10, textAnchor:"middle", fontSize:"10", fill:C.textMid }, "hours"),
+      sub && h('text', { x:cx, y:cy+23, textAnchor:"middle", fontSize:"8.5", fill:C.textDim }, sub)
+    ),
+    h('p', { style:{margin:"4px 0 0",fontSize:12,color:C.textMid} }, label)
+  );
+}
+
+// ─── Timeline bar ─────────────────────────────────────────────────────────────
+function Timeline({accrued, eoy, taken, scheduled, rollover}) {
+  const max = Math.max(eoy + (rollover||0), 10), ro = rollover||0;
+  const rem = Math.max(0, eoy - accrued), np = yearProgress();
+  const segs = [
+    {v:ro,        c:"#14b8a6", l:"Rollover"},
+    {v:accrued,   c:C.accent,  l:"Accrued"},
+    {v:rem,       c:C.accentDim,l:"Remaining"},
+    {v:taken,     c:C.amber,   l:"Taken"},
+    {v:scheduled, c:"#78350f", l:"Scheduled"}
+  ];
+  return h('div', null,
+    h('div', { style:{position:"relative",height:18,background:C.card2,borderRadius:9,overflow:"hidden",display:"flex"} },
+      segs.map((s,i) => h('div', { key:i, style:{width:`${Math.max(0,(s.v/max)*100)}%`,background:s.c,height:"100%"} }))
+    ),
+    h('div', { style:{position:"relative",marginTop:-22,pointerEvents:"none"} },
+      h('div', { style:{position:"absolute",left:`${np*100}%`,transform:"translateX(-50%)",width:2,height:28,background:C.text,borderRadius:1,opacity:.9} })
+    ),
+    h('div', { style:{marginTop:28,display:"flex",flexWrap:"wrap",gap:"6px 14px"} },
+      segs.map(s => h('div', { key:s.l, style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:9,height:9,borderRadius:2,background:s.c} }),
+        s.l
+      )),
+      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:2,height:12,background:C.text,borderRadius:1} }),
+        " Today"
+      )
+    )
+  );
+}
+
+// ─── Mini Calendar ────────────────────────────────────────────────────────────
+function MiniCalendar({entries, isAdmin, allStaff}) {
+  const now = new Date();
+  const [yr, setYr] = useState(now.getFullYear());
+  const [mo, setMo] = useState(now.getMonth());
+  const [sel, setSel] = useState(null);
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const firstDay = new Date(yr,mo,1).getDay(), days = new Date(yr,mo+1,0).getDate();
+
+  function dStr(d) { return `${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+
+  function evtsFor(d) {
+    const ds = dStr(d), dateObj = new Date(ds+"T12:00:00");
+    function touches(e) {
+      if (e.type!=="taken"&&e.type!=="scheduled") return false;
+      if (e.isRange && e.endDate) {
+        const s=new Date(e.date+"T12:00:00"), en=new Date(e.endDate+"T12:00:00");
+        return dateObj>=s && dateObj<=en;
+      }
+      return e.date===ds;
+    }
+    if (isAdmin) {
+      const r=[];
+      (allStaff||[]).forEach(emp => (emp.entries||[]).filter(touches).forEach(e => r.push({...e,empName:emp.name})));
+      return r;
+    }
+    return (entries||[]).filter(touches);
+  }
+
+  function getRangePos(e, d) {
+    if (!e.isRange||!e.endDate) return null;
+    const ds=dStr(d), dateObj=new Date(ds+"T12:00:00");
+    const start=new Date(e.date+"T12:00:00"), end=new Date(e.endDate+"T12:00:00");
+    const mStart=new Date(yr,mo,1), mEnd=new Date(yr,mo,days);
+    const effStart=start<mStart?mStart:start, effEnd=end>mEnd?mEnd:end;
+    if (dateObj<effStart||dateObj>effEnd) return null;
+    return { isStart:dateObj.getTime()===effStart.getTime(), isEnd:dateObj.getTime()===effEnd.getTime() };
+  }
+
+  function getDayRanges(d) {
+    return evtsFor(d).filter(e=>e.isRange&&e.endDate).map(e=>({...e,pos:getRangePos(e,d)})).filter(e=>e.pos);
+  }
+
+  function getDaySingles(d) {
+    const ds = dStr(d);
+    if (isAdmin) {
+      const r=[];
+      (allStaff||[]).forEach(emp => (emp.entries||[])
+        .filter(e=>(e.type==="taken"||e.type==="scheduled")&&!e.isRange&&e.date===ds)
+        .forEach(e=>r.push({...e,empName:emp.name})));
+      return r;
+    }
+    return (entries||[]).filter(e=>(e.type==="taken"||e.type==="scheduled")&&!e.isRange&&e.date===ds);
+  }
+
+  const selEvts = sel ? evtsFor(sel) : [];
+
+  return h(Card, null,
+    h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"} },
+      h('button', { className:"ghost", onClick:()=>{if(mo===0){setMo(11);setYr(y=>y-1);}else setMo(m=>m-1);}, style:{padding:"6px 10px",fontSize:16} }, "‹"),
+      h('span', { style:{fontWeight:600,fontSize:15} }, `${months[mo]} ${yr}`),
+      h('button', { className:"ghost", onClick:()=>{if(mo===11){setMo(0);setYr(y=>y+1);}else setMo(m=>m+1);}, style:{padding:"6px 10px",fontSize:16} }, "›")
+    ),
+    h('div', { style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:8} },
+      ["Su","Mo","Tu","We","Th","Fr","Sa"].map(d =>
+        h('div', { key:d, style:{textAlign:"center",fontSize:11,color:C.textDim,padding:"4px 0",fontWeight:600} }, d)
+      ),
+      Array.from({length:firstDay}).map((_,i) => h('div', {key:`e${i}`})),
+      Array.from({length:days}).map((_,i) => {
+        const day=i+1;
+        const isToday=now.getFullYear()===yr&&now.getMonth()===mo&&now.getDate()===day;
+        const isSel=sel===day;
+        const ranges=getDayRanges(day), singles=getDaySingles(day);
+        const hasTR=ranges.some(e=>e.type==="taken"), hasSR=ranges.some(e=>e.type==="scheduled");
+        const hasTakenSingle=singles.some(e=>e.type==="taken"), hasSchedSingle=singles.some(e=>e.type==="scheduled");
+        const tRange=ranges.find(e=>e.type==="taken"), sRange=ranges.find(e=>e.type==="scheduled");
+        return h('div', {
+          key:day, onClick:()=>setSel(isSel?null:day),
+          style:{ position:"relative",textAlign:"center",padding:"6px 2px 4px",
+            borderRadius:isSel?8:0, cursor:(ranges.length||singles.length)?"pointer":"default",
+            background:isSel?C.accent:isToday?C.card2:"transparent",
+            border:isToday&&!isSel?`1px solid ${C.accent}`:"1px solid transparent",
+            overflow:"visible", zIndex:1 }
+        },
+          h('span', { style:{fontSize:13,color:isSel?"#fff":isToday?C.accentText:C.text,position:"relative",zIndex:2} }, day),
+          (hasTR||hasSR) && h('div', { style:{position:"absolute",bottom:3,left:0,right:0,display:"flex",flexDirection:"column",gap:1,zIndex:2} },
+            hasTR && tRange?.pos && h('div', { style:{height:4,background:C.amber,
+              marginLeft:tRange.pos.isStart?4:0, marginRight:tRange.pos.isEnd?4:0,
+              borderRadius:tRange.pos.isStart&&tRange.pos.isEnd?3:tRange.pos.isStart?"3px 0 0 3px":tRange.pos.isEnd?"0 3px 3px 0":0} }),
+            hasSR && sRange?.pos && h('div', { style:{height:4,background:C.green,
+              marginLeft:sRange.pos.isStart?4:0, marginRight:sRange.pos.isEnd?4:0,
+              borderRadius:sRange.pos.isStart&&sRange.pos.isEnd?3:sRange.pos.isStart?"3px 0 0 3px":sRange.pos.isEnd?"0 3px 3px 0":0} })
+          ),
+          (hasTakenSingle||hasSchedSingle)&&!hasTR&&!hasSR && h('div', { style:{display:"flex",justifyContent:"center",gap:2,marginTop:2} },
+            hasTakenSingle  && h('div', { style:{width:5,height:5,borderRadius:"50%",background:C.amber} }),
+            hasSchedSingle  && h('div', { style:{width:5,height:5,borderRadius:"50%",background:C.green} })
+          )
+        );
+      })
+    ),
+    sel && selEvts.length>0 && h('div', { style:{marginTop:"0.75rem",borderTop:`1px solid ${C.border}`,paddingTop:"0.75rem"} },
+      h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 8px",fontWeight:600} }, `${months[mo]} ${sel}`),
+      selEvts.map((e,i) =>
+        h('div', { key:i, style:{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:C.card2,borderRadius:8,marginBottom:4} },
+          h('div', null,
+            isAdmin && h('span', { style:{fontSize:12,fontWeight:600,color:C.accentText,marginRight:8} }, e.empName),
+            h('span', { style:{fontSize:13} }, e.isRange ? `${e.date} → ${e.endDate}` : e.date, ` · ${fmt(e.hours)}h`),
+            e.note && h('span', { style:{fontSize:12,color:C.textMid,marginLeft:6} }, e.note)
+          ),
+          h('span', { style:{fontSize:11,padding:"2px 8px",borderRadius:6,fontWeight:600,
+            background:e.type==="taken"?`${C.amberDim}88`:C.greenDim,
+            color:e.type==="taken"?C.amberText:C.greenText} }, e.type)
+        )
+      )
+    ),
+    sel && selEvts.length===0 && h('p', { style:{fontSize:13,color:C.textDim,textAlign:"center",marginTop:"0.75rem"} }, `No PTO on ${months[mo]} ${sel}`),
+    h('div', { style:{display:"flex",gap:16,marginTop:"0.75rem",flexWrap:"wrap"} },
+      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:7,height:7,borderRadius:"50%",background:C.amber} }), " Taken (single)"),
+      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:7,height:7,borderRadius:"50%",background:C.green} }), " Scheduled (single)"),
+      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:16,height:4,borderRadius:2,background:C.amber} }), " Taken (range)"),
+      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
+        h('div', { style:{width:16,height:4,borderRadius:2,background:C.green} }), " Scheduled (range)")
+    )
+  );
+}
+
+// ─── Entry Form ───────────────────────────────────────────────────────────────
+function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
+  const now = new Date().toISOString().split("T")[0];
+  const [date, setDate]     = useState(initial?.date || now);
+  const [endDate, setEndDate]= useState(initial?.endDate || "");
+  const [useRange, setUseRange]= useState(!!initial?.isRange);
+  const [hours, setHours]   = useState(initial?.hours!==undefined ? String(initial.hours) : "");
+  const [type, setType]     = useState(initial?.type || "taken");
+  const [note, setNote]     = useState(initial?.note || "");
+  const [err, setErr]       = useState("");
+
+  const dailyHours = r2((weeklyHours||40)/5);
+
+  useEffect(() => {
+    if (useRange && endDate && date && endDate>=date && type!=="adjustment")
+      setHours(String(r2(countWeekdays(date,endDate)*dailyHours)));
+  }, [useRange, date, endDate, dailyHours, type]);
+
+  function save() {
+    const hv = parseFloat(hours);
+    if (isNaN(hv)) { setErr("Enter valid hours."); return; }
+    if (type==="adjustment" && hv===0) { setErr("Adjustment cannot be zero."); return; }
+    if (type!=="adjustment" && hv<MIN_PTO_HOURS) { setErr(`Minimum is ${MIN_PTO_HOURS} hours.`); return; }
+    if (type==="taken" && hv>balance+0.001 && !initial) { setErr(`Exceeds available balance (${fmt(balance)} hrs).`); return; }
+    const entry = useRange && endDate && type!=="adjustment"
+      ? { date, endDate, hours:r2(hv), type, note, isRange:true }
+      : { date, hours:r2(hv), type, note };
+    onSave(entry);
+  }
+
+  const wkdCount = useRange&&date&&endDate&&endDate>=date ? countWeekdays(date,endDate) : 0;
+
+  return h('div', null,
+    h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12} },
+      ["taken","scheduled","adjustment"].map(t =>
+        h('button', {
+          key:t, onClick:()=>{setType(t);setErr("");},
+          style:{ padding:"10px 4px",borderRadius:10,fontSize:12,fontWeight:type===t?600:400,
+            background:type===t?(t==="taken"?C.amberDim:t==="scheduled"?C.greenDim:C.card2):C.card2,
+            border:type===t?`1.5px solid ${t==="taken"?C.amber:t==="scheduled"?C.green:C.accent}`:`1px solid ${C.border}`,
+            color:type===t?(t==="taken"?C.amberText:t==="scheduled"?C.greenText:C.accentText):C.textMid }
+        }, t==="taken"?"✓ Taken":t==="scheduled"?"⏰ Scheduled":"± Adjust")
+      )
+    ),
+    type!=="adjustment" && h('div', { style:{display:"flex",gap:8,marginBottom:14} },
+      h('button', { onClick:()=>{setUseRange(false);setEndDate("");},
+        style:{flex:1,padding:"8px 4px",borderRadius:9,fontSize:12,fontWeight:!useRange?600:400,
+          background:!useRange?C.card:"transparent",
+          border:!useRange?`1px solid ${C.border}`:"1px solid transparent",
+          color:!useRange?C.text:C.textMid} }, "Single day"),
+      h('button', { onClick:()=>setUseRange(true),
+        style:{flex:1,padding:"8px 4px",borderRadius:9,fontSize:12,fontWeight:useRange?600:400,
+          background:useRange?C.card:"transparent",
+          border:useRange?`1px solid ${C.border}`:"1px solid transparent",
+          color:useRange?C.text:C.textMid} }, "Date range")
+    ),
+    h('div', { style:{display:"grid",gridTemplateColumns:useRange&&type!=="adjustment"?"1fr 1fr":"1fr",gap:10} },
+      h(Field, { label:useRange&&type!=="adjustment"?"Start date":"Date" },
+        h('input', { type:"date", value:date, onChange:e=>setDate(e.target.value) })
+      ),
+      useRange && type!=="adjustment" && h(Field, { label:"End date", hint:"Weekdays only" },
+        h('input', { type:"date", value:endDate, min:date, onChange:e=>setEndDate(e.target.value) })
+      )
+    ),
+    useRange && wkdCount>0 && type!=="adjustment" &&
+      h('div', { style:{background:C.card2,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.textMid} },
+        `${wkdCount} weekday${wkdCount!==1?"s":""} × ${dailyHours}h = `,
+        h('strong', { style:{color:C.text} }, `${fmt(wkdCount*dailyHours)} hrs`)
+      ),
+    balance<0 && type==="scheduled" &&
+      h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:8,padding:"8px 12px",marginBottom:10} },
+        h('p', { style:{margin:0,fontSize:12,color:C.amberText} }, "⚠ Current balance is negative. You can still schedule future PTO.")
+      ),
+    h(Field, { label:"Hours", hint:type==="adjustment"?"Negative to deduct, positive to add":useRange?"Auto-calculated — adjust if needed":"" },
+      h('input', { type:"number", step:"0.01", value:hours, onChange:e=>setHours(e.target.value),
+        placeholder:type==="adjustment"?"-4.00 or +8.00":"e.g. 8.00" })
+    ),
+    h(Field, { label:"Note (optional)" },
+      h('input', { value:note, onChange:e=>setNote(e.target.value), placeholder:"e.g. vacation" })
+    ),
+    err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+    h('div', { style:{display:"flex",gap:8} },
+      h('button', { className:"primary", onClick:save, style:{flex:2} }, "Save"),
+      h('button', { onClick:onCancel, style:{flex:1} }, "Cancel")
+    )
+  );
+}
+
+// ─── Change PIN Modal ─────────────────────────────────────────────────────────
+function ChangePinModal({emp, onClose, onSave}) {
+  const [step, setStep] = useState(1);
+  const [current, setCurrent] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [err, setErr] = useState("");
+
+  function verify() {
+    if (hashPin(current)===emp.pin) { setStep(2); setErr(""); }
+    else setErr("Incorrect PIN.");
+  }
+  function save() {
+    if (p1.length<4) { setErr("Min 4 digits."); return; }
+    if (p1!==p2) { setErr("PINs don't match."); return; }
+    onSave(p1);
+  }
+
+  return h('div', { style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:"1rem"} },
+    h('div', { style:{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:"1.5rem",width:"100%",maxWidth:360} },
+      h('h3', { style:{margin:"0 0 1rem",fontSize:16,fontWeight:600,color:C.text} }, "Change PIN"),
+      step===1 && h(Fragment, null,
+        h(Field, { label:"Current PIN" },
+          h('input', { type:"password", maxLength:8, value:current, onChange:e=>setCurrent(e.target.value),
+            onKeyDown:e=>e.key==="Enter"&&verify(), placeholder:"••••••", autoFocus:true })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('div', { style:{display:"flex",gap:8} },
+          h('button', { className:"primary", onClick:verify, style:{flex:2} }, "Next →"),
+          h('button', { onClick:onClose, style:{flex:1} }, "Cancel")
+        )
+      ),
+      step===2 && h(Fragment, null,
+        h(Field, { label:"New PIN (min 4 digits)" },
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••", autoFocus:true })
+        ),
+        h(Field, { label:"Confirm new PIN" },
+          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value),
+            onKeyDown:e=>e.key==="Enter"&&save(), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('div', { style:{display:"flex",gap:8} },
+          h('button', { onClick:()=>{setStep(1);setErr("");}, style:{flex:1} }, "← Back"),
+          h('button', { className:"primary", onClick:save, style:{flex:2} }, "Save new PIN")
+        )
+      )
+    )
+  );
+}
+
+// ─── Projected Balance ────────────────────────────────────────────────────────
+function ProjectedBalance({emp}) {
+  const [projDate, setProjDate] = useState("");
+  const now = new Date(), minDate = now.toISOString().split("T")[0];
+  const pty = currentPTOYear(), entries = emp.entries||[];
+  const takenActual = entries.filter(e=>e.type==="taken"&&getPTOYear(e.date)===pty&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0);
+  const takenNegAdj = entries.filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty&&e.hours<0).reduce((a,e)=>a+Math.abs(e.hours),0);
+  const takenYTD = r2(takenActual + takenNegAdj);
+  const adjTotal = entries.filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
+
+  function calcProjected(targetDateStr) {
+    if (!targetDateStr) return null;
+    const target = new Date(targetDateStr+"T23:59:59");
+    if (target<=now) return null;
+    const start = new Date(pty,0,2);
+    const projAcc = r2(((target-start)/(1000*60*60*24*7))*weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null));
+    const scheduled = entries.filter(e=>e.type==="scheduled"&&new Date(e.date+"T12:00:00")>now&&new Date(e.date+"T12:00:00")<=target).reduce((a,e)=>a+e.hours,0);
+    return { balance:r2((emp.rolloverHours||0)+projAcc+adjTotal-takenActual-scheduled), accruedByThen:projAcc, scheduledBefore:r2(scheduled) };
+  }
+
+  const proj = calcProjected(projDate);
+
+  return h(Card, { style:{marginTop:"1rem"} },
+    h('h3', { style:{margin:"0 0 0.75rem",fontSize:15,fontWeight:600,color:C.text} }, "Projected balance"),
+    h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 10px"} }, "Enter a future date to see your estimated balance on that day."),
+    h(Field, { label:"Project to date" },
+      h('input', { type:"date", value:projDate, min:minDate, onChange:e=>setProjDate(e.target.value) })
+    ),
+    proj && h(Fragment, null,
+      h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4} },
+        [
+          {label:"Projected balance", value:`${fmt(proj.balance)} hrs`, color:proj.balance<0?C.red:proj.balance<8?C.amberText:C.greenText},
+          {label:"Accrued by then",   value:`${fmt(proj.accruedByThen)} hrs`, color:C.text},
+          {label:"Taken YTD",         value:`${fmt(takenYTD)} hrs`, color:C.amberText},
+          {label:"Scheduled before then", value:`${fmt(proj.scheduledBefore)} hrs`, color:C.amberText}
+        ].map(({label,value,color}) =>
+          h('div', { key:label, style:{background:C.card2,borderRadius:10,padding:"0.6rem 0.9rem",border:`1px solid ${C.border}`} },
+            h('div', { style:{fontSize:10,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3} }, label),
+            h('div', { style:{fontSize:15,fontWeight:600,color} }, value)
+          )
+        )
+      ),
+      proj.balance<0 && h('div', { style:{background:`${C.red}18`,border:`1px solid ${C.redDim}`,borderRadius:10,padding:"8px 12px",marginTop:10} },
+        h('p', { style:{margin:0,fontSize:12,color:C.redText} }, "⚠ Your balance would be negative on this date.")
+      )
+    ),
+    projDate && !proj && h('p', { style:{fontSize:12,color:C.textDim,marginTop:6} }, "Please select a future date.")
+  );
+}
+
+// ─── History View ─────────────────────────────────────────────────────────────
+function HistoryView({emp, balance, onSave, onDelete}) {
+  const [editEntry, setEditEntry] = useState(null);
+  const [sortBy, setSortBy] = useState("ptoDate");
+  const [showAccruals, setShowAccruals] = useState(false);
+  const [showAllAccruals, setShowAllAccruals] = useState(false);
+  const pty = currentPTOYear();
+
+  const accrualEvents = useMemo(() => {
+    if (!showAccruals) return [];
+    const evts=[], dailyRate=r2(weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null)/7);
+    const start=new Date(pty,0,2), today=new Date();
+    const cutoff=showAllAccruals?start:new Date(today.getTime()-30*24*60*60*1000);
+    const effectiveStart=cutoff>start?cutoff:start;
+    for (let d=new Date(effectiveStart); d<=today; d.setDate(d.getDate()+1)) {
+      const dateStr=d.toISOString().split("T")[0];
+      evts.push({id:`accrual-${dateStr}`,type:"accrual",date:dateStr,entryDate:dateStr,hours:dailyRate,note:"Daily accrual",isAccrual:true});
+    }
+    return evts;
+  }, [showAccruals, showAllAccruals, emp, pty]);
+
+  const allEntries = [...(emp.entries||[]).map(e=>({...e,entryDate:e.entryDate||e.date})), ...accrualEvents];
+  const sorted = [...allEntries].sort((a,b)=>new Date((sortBy==="ptoDate"?b.date:b.entryDate)+"T12:00:00")-new Date((sortBy==="ptoDate"?a.date:a.entryDate)+"T12:00:00"));
+
+  return h(Card, null,
+    h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8} },
+      h('h3', { style:{margin:0,fontSize:16,fontWeight:600} }, "Activity history"),
+      h('div', { style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"} },
+        h('div', { style:{display:"flex",background:C.card2,borderRadius:8,overflow:"hidden",border:`1px solid ${C.border}`} },
+          [["ptoDate","By PTO date"],["entryDate","By entry date"]].map(([v,l]) =>
+            h('button', { key:v, onClick:()=>setSortBy(v),
+              style:{padding:"5px 10px",borderRadius:0,border:"none",fontSize:12,
+                background:sortBy===v?C.accent:"transparent",
+                color:sortBy===v?"#fff":C.textMid, fontWeight:sortBy===v?600:400} }, l)
+          )
+        ),
+        h('button', { onClick:()=>{setShowAccruals(s=>!s);setShowAllAccruals(false);},
+          style:{padding:"5px 12px",fontSize:12,borderRadius:8,
+            background:showAccruals?`${C.accent}33`:"transparent",
+            border:`1px solid ${showAccruals?C.accent:C.border}`,
+            color:showAccruals?C.accentText:C.textMid} },
+          showAccruals?"Hide accruals":"Show accruals"
+        ),
+        showAccruals && h('button', { onClick:()=>setShowAllAccruals(s=>!s),
+          style:{padding:"5px 12px",fontSize:12,borderRadius:8,background:"transparent",border:`1px solid ${C.border}`,color:C.textMid} },
+          showAllAccruals?"Last 30 days":"Show all YTD"
+        )
+      )
+    ),
+    sorted.length===0 && h('p', { style:{color:C.textDim,fontSize:13,textAlign:"center",padding:"1.5rem 0"} }, "No entries yet."),
+    sorted.map(e =>
+      h('div', { key:e.id, style:{padding:"10px 0",borderBottom:`1px solid ${C.border}`} },
+        !e.isAccrual && editEntry?.id===e.id
+          ? h(EntryForm, { initial:e, balance, weeklyHours:emp.weeklyHours,
+              onSave:d=>{onSave(d,e.id);setEditEntry(null);},
+              onCancel:()=>setEditEntry(null) })
+          : h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center"} },
+              h('div', null,
+                h('div', { style:{fontSize:14,fontWeight:500,color:e.isAccrual?C.textMid:C.text} },
+                  e.isRange?`${e.date} → ${e.endDate}`:e.date, " — ",
+                  h('span', { style:{color:e.isAccrual?C.greenText:e.type==="adjustment"?(e.hours<0?C.red:C.green):e.type==="taken"?C.amberText:C.greenText} },
+                    `${e.hours>=0&&e.type==="adjustment"?"+":""}${fmt(e.hours)}h`)
+                ),
+                e.note && h('div', { style:{fontSize:12,color:C.textMid,marginTop:2} }, e.note),
+                e.addedBy==="admin" && h('div', { style:{fontSize:11,color:C.accentText,marginTop:2} }, "Added by admin"),
+                h('div', { style:{fontSize:11,color:C.textDim,marginTop:2} }, `PTO year ${getPTOYear(e.date)}`)
+              ),
+              h('div', { style:{display:"flex",gap:6,alignItems:"center"} },
+                h('span', { style:{fontSize:11,padding:"3px 8px",borderRadius:6,fontWeight:600,
+                  background:e.isAccrual?`${C.green}22`:e.type==="taken"?`${C.amberDim}88`:e.type==="scheduled"?C.greenDim:`${C.accent}33`,
+                  color:e.isAccrual?C.greenText:e.type==="taken"?C.amberText:e.type==="scheduled"?C.greenText:C.accentText} },
+                  e.isAccrual?"accrual":e.type),
+                !e.isAccrual && h(Fragment, null,
+                  h('button', { className:"ghost", onClick:()=>setEditEntry(e), style:{fontSize:11,padding:"3px 8px"} }, "edit"),
+                  h('button', { className:"danger", onClick:()=>onDelete(e.id), style:{fontSize:11,padding:"3px 8px"} }, "×")
+                )
+              )
+            )
+      )
+    )
+  );
+}
+
+// ─── Report View ──────────────────────────────────────────────────────────────
+function ReportView({staff, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover}) {
+  const [selected, setSelected] = useState(staff.map(s=>s.name));
+  const [generated, setGenerated] = useState(false);
+
+  function toggleAll() { setSelected(selected.length===staff.length ? [] : staff.map(s=>s.name)); }
+  function toggleOne(name) { setSelected(s=>s.includes(name)?s.filter(x=>x!==name):[...s,name]); }
+
+  const reportData = staff.filter(s=>selected.includes(s.name)).map(emp=>({
+    name:emp.name, lastName:lastName(emp.name), hireDate:emp.hireDate,
+    weeklyHours:emp.weeklyHours,
+    annualAllotment:getAccrualRate(emp.hireDate,emp.ptoOverride||null),
+    weeklyRate:fmt(weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null)),
+    rollover:fmt(emp.rolloverHours||0),
+    accruedYTD:fmt(calcAccruedInYear(emp.hireDate,emp.weeklyHours,currentPTOYear(),emp.ptoOverride||null)),
+    takenYTD:fmt(calcTakenYTD(emp)), scheduled:fmt(calcScheduled(emp)),
+    available:fmt(calcBalance(emp)), eoyEst:fmt(calcEOYBalance(emp)),
+    nextRollover:fmt(calcNextRollover(emp)), ptoOverride:emp.ptoOverride||""
+  }));
+
+  function exportCSV() {
+    const hdr=["Name","Hire Date","Hrs/Wk","PTO Override","Annual Allotment","Weekly Rate","Rollover","Accrued YTD","Taken YTD","Scheduled","Available Now","Est. EOY Balance","Est. Next Rollover"];
+    const rows=reportData.map(r=>[r.name,r.hireDate,r.weeklyHours,r.ptoOverride,r.annualAllotment,r.weeklyRate,r.rollover,r.accruedYTD,r.takenYTD,r.scheduled,r.available,r.eoyEst,r.nextRollover]);
+    const csv=[hdr,...rows].map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");
+    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download=`PTO_Report_${new Date().toISOString().split("T")[0]}.csv`;a.click();
+  }
+
+  const pty=currentPTOYear(), reportDate=new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"});
+  const reportHeaders=["Name","Hire Date","Hrs/Wk","Allotment","Wkly Rate","Rollover","Accrued YTD","Taken YTD","Scheduled","Available","Est. EOY","Est. Rollover"];
+
+  if (!generated) return h(Card, null,
+    h('h3', { style:{margin:"0 0 1rem",fontSize:16,fontWeight:600} }, "Generate Report"),
+    h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10} },
+      h('span', { style:{fontSize:13,color:C.textMid} }, `${selected.length} of ${staff.length} selected`),
+      h('button', { className:"ghost", onClick:toggleAll, style:{fontSize:12,padding:"4px 10px"} }, selected.length===staff.length?"Deselect all":"Select all")
+    ),
+    h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:"1.25rem"} },
+      [...staff].sort((a,b)=>lastName(a.name).localeCompare(lastName(b.name))).map(s =>
+        h('div', { key:s.name, onClick:()=>toggleOne(s.name),
+          style:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,cursor:"pointer",
+            background:selected.includes(s.name)?`${C.accent}22`:C.card2,
+            border:`1px solid ${selected.includes(s.name)?C.accent:C.border}`} },
+          h('div', { style:{width:16,height:16,borderRadius:4,
+            background:selected.includes(s.name)?C.accent:C.card,
+            border:`1.5px solid ${selected.includes(s.name)?C.accent:C.border}`,
+            display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0} },
+            selected.includes(s.name) && h('span', { style:{fontSize:10,color:"#fff",fontWeight:700} }, "✓")
+          ),
+          h('span', { style:{fontSize:13,color:selected.includes(s.name)?C.text:C.textMid} }, s.name)
+        )
+      )
+    ),
+    h('button', { className:"primary", onClick:()=>setGenerated(true), disabled:selected.length===0, style:{width:"100%",padding:"12px"} }, "Generate Report")
+  );
+
+  return h('div', null,
+    h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8} },
+      h('p', { style:{margin:0,fontSize:13,color:C.textMid} }, `PTO Year ${pty} · As of ${reportDate}`),
+      h('div', { style:{display:"flex",gap:8} },
+        h('button', { onClick:()=>setGenerated(false), style:{fontSize:12,padding:"6px 12px"} }, "← Edit"),
+        h('button', { className:"primary", onClick:exportCSV, style:{fontSize:12,padding:"6px 12px"} }, "Export CSV")
+      )
+    ),
+    h(Card, { style:{padding:0,overflow:"hidden"} },
+      h('div', { style:{overflowX:"auto"} },
+        h('table', { style:{width:"100%",borderCollapse:"collapse",fontSize:12} },
+          h('thead', null, h('tr', { style:{background:C.card2} },
+            reportHeaders.map(hd => h('th', { key:hd, style:{padding:"10px",textAlign:"left",fontWeight:600,color:C.textMid,fontSize:10,whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:`1px solid ${C.border}`} }, hd))
+          )),
+          h('tbody', null,
+            reportData.map((r,i) =>
+              h('tr', { key:r.name, style:{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2} },
+                h('td', { style:{padding:"10px",fontWeight:600,color:C.text,whiteSpace:"nowrap"} }, r.name),
+                h('td', { style:{padding:"10px",color:C.textMid} }, r.hireDate),
+                h('td', { style:{padding:"10px",color:C.text} }, r.weeklyHours),
+                h('td', { style:{padding:"10px",color:C.accentText} }, r.annualAllotment, r.ptoOverride?" ★":""),
+                h('td', { style:{padding:"10px",color:C.textMid} }, r.weeklyRate),
+                h('td', { style:{padding:"10px",color:C.text} }, r.rollover),
+                h('td', { style:{padding:"10px",color:C.text} }, r.accruedYTD),
+                h('td', { style:{padding:"10px",color:C.amberText} }, r.takenYTD),
+                h('td', { style:{padding:"10px",color:C.greenText} }, r.scheduled),
+                h('td', { style:{padding:"10px",color:C.accentText,fontWeight:600} }, r.available),
+                h('td', { style:{padding:"10px",color:C.greenText,fontWeight:600} }, r.eoyEst),
+                h('td', { style:{padding:"10px",color:parseFloat(r.nextRollover)>=ROLLOVER_CAP?C.amber:C.textMid} }, r.nextRollover)
+              )
+            )
+          ),
+          h('tfoot', null, h('tr', { style:{borderTop:`2px solid ${C.border}`,background:C.card2} },
+            h('td', { colSpan:9, style:{padding:"10px",fontSize:12,fontWeight:600,color:C.textMid} }, `Totals (${reportData.length})`),
+            h('td', { style:{padding:"10px",fontWeight:700,color:C.accentText} }, fmt(reportData.reduce((a,r)=>a+parseFloat(r.available),0))),
+            h('td', { style:{padding:"10px",fontWeight:700,color:C.greenText} }, fmt(reportData.reduce((a,r)=>a+parseFloat(r.eoyEst),0))),
+            h('td', { style:{padding:"10px",fontWeight:700,color:C.textMid} }, fmt(reportData.reduce((a,r)=>a+parseFloat(r.nextRollover),0)))
+          ))
+        )
+      )
+    )
+  );
+}
+
+// ─── Home Screen ──────────────────────────────────────────────────────────────
+function HomeScreen({staff, adminPin, onEmployee, onAdmin}) {
+  const [name, setName] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
+  const [adminPin_, setAdminPin_] = useState("");
+  const [err, setErr] = useState("");
+
+  return h('div', { style:{maxWidth:420,margin:"0 auto",padding:"3rem 1rem",minHeight:"100vh"} },
+    h('div', { style:{textAlign:"center",marginBottom:"2.5rem"} },
+      h('div', { style:{width:70,height:70,borderRadius:"50%",background:"#6366f122",border:"2px solid #6366f144",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1.25rem",fontSize:32} }, "🌴"),
+      h('h1', { style:{margin:0,fontSize:28,fontWeight:700,color:C.text,letterSpacing:"-0.03em"} }, "CxA PTO Tracker"),
+      h('p', { style:{margin:"6px 0 0",fontSize:14,color:C.textMid} }, "Your time off, tracked beautifully")
+    ),
+    h(Card, { style:{marginBottom:"1rem"} },
+      h(Field, { label:"Your name" },
+        h('select', { value:name, onChange:e=>setName(e.target.value) },
+          h('option', { value:"" }, "— choose —"),
+          [...staff].sort((a,b)=>lastName(a.name).localeCompare(lastName(b.name))).map(e =>
+            h('option', { key:e.name }, e.name)
+          )
+        )
+      ),
+      err && !adminMode && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+      h('button', { className:"primary", onClick:()=>{
+        if (!name) { setErr("Select your name."); return; }
+        setErr("");
+        const e = staff.find(s=>s.name===name);
+        onEmployee(name, !e?.pin);
+      }, style:{width:"100%",padding:"12px"} }, "Continue →")
+    ),
+    h(Card, null,
+      !adminMode
+        ? h('button', { className:"ghost", onClick:()=>setAdminMode(true), style:{fontSize:13,padding:"4px 0"} }, "Admin access →")
+        : h(Fragment, null,
+            h('p', { style:{margin:"0 0 10px",fontSize:14,fontWeight:500} }, "Admin login"),
+            h(Field, { label:"Admin PIN" },
+              h('input', { type:"password", maxLength:8, value:adminPin_, onChange:e=>setAdminPin_(e.target.value),
+                onKeyDown:e=>e.key==="Enter"&&(adminPin_===adminPin?onAdmin():setErr("Wrong PIN.")), placeholder:"••••••" })
+            ),
+            err && adminMode && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+            h('div', { style:{display:"flex",gap:8} },
+              h('button', { className:"primary", onClick:()=>adminPin_===adminPin?onAdmin():setErr("Wrong PIN."), style:{flex:2} }, "Sign in"),
+              h('button', { onClick:()=>{setAdminMode(false);setErr("");}, style:{flex:1} }, "Cancel")
+            )
+          )
+    )
+  );
+}
+
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
+  const [step, setStep] = useState(setupMode ? "s1" : "login");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [err, setErr] = useState("");
+  const [resetDate, setResetDate] = useState("");
+  const emp = staff.find(s=>s.name===name);
+
+  async function setPin() {
+    if (p1.length<4) { setErr("Min 4 digits."); return; }
+    if (p1!==p2) { setErr("Don't match."); return; }
+    await persist(staff.map(e=>e.name===name?{...e,pin:hashPin(p1)}:e));
+    onSuccess();
+  }
+  function login() {
+    if (hashPin(p1)===emp?.pin) onSuccess();
+    else setErr("Wrong PIN.");
+  }
+  function verifyHireDate() {
+    if (resetDate===emp?.hireDate) { setStep("reset1"); setErr(""); }
+    else setErr("Hire date doesn't match. Please contact your admin.");
+  }
+
+  const stepSub = setupMode?"First time — create a PIN":step==="forgot"?"Verify your identity":step.startsWith("reset")?"Reset your PIN":"Welcome back";
+
+  return h('div', { style:{maxWidth:400,margin:"0 auto",padding:"2.5rem 1rem",minHeight:"100vh"} },
+    h('button', { className:"ghost", onClick:onBack, style:{marginBottom:"1.5rem",fontSize:13} }, "← Back"),
+    h('div', { style:{display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem"} },
+      h(Avatar, { name, size:48 }),
+      h('div', null,
+        h('p', { style:{margin:0,fontWeight:600,fontSize:17,color:C.text} }, name),
+        h('p', { style:{margin:0,fontSize:13,color:C.textMid} }, stepSub)
+      )
+    ),
+    h(Card, null,
+      step==="login" && h(Fragment, null,
+        h(Field, { label:"Your PIN" },
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), onKeyDown:e=>e.key==="Enter"&&login(), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('button', { className:"primary", onClick:login, style:{width:"100%",padding:"12px",marginBottom:10} }, "Sign in"),
+        h('button', { className:"ghost", onClick:()=>{setStep("forgot");setErr("");setP1("");}, style:{width:"100%",fontSize:13} }, "Forgot my PIN")
+      ),
+      step==="forgot" && h(Fragment, null,
+        h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Enter your hire date to verify your identity."),
+        h(Field, { label:"Your hire date" },
+          h('input', { type:"date", value:resetDate, onChange:e=>setResetDate(e.target.value) })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('div', { style:{display:"flex",gap:8} },
+          h('button', { className:"primary", onClick:verifyHireDate, style:{flex:2} }, "Verify"),
+          h('button', { onClick:()=>{setStep("login");setErr("");setResetDate("");}, style:{flex:1} }, "Cancel")
+        )
+      ),
+      step==="reset1" && h(Fragment, null,
+        h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Identity verified! Choose a new PIN."),
+        h(Field, { label:"New PIN (min 4 digits)" },
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('button', { className:"primary", onClick:()=>{if(p1.length<4){setErr("Min 4 digits.");}else{setErr("");setStep("reset2");}}, style:{width:"100%",padding:"12px"} }, "Next →")
+      ),
+      step==="reset2" && h(Fragment, null,
+        h(Field, { label:"Confirm new PIN" },
+          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value), onKeyDown:e=>e.key==="Enter"&&setPin(), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('div', { style:{display:"flex",gap:8} },
+          h('button', { onClick:()=>{setStep("reset1");setErr("");}, style:{flex:1} }, "← Back"),
+          h('button', { className:"primary", onClick:setPin, style:{flex:2} }, "Set PIN & sign in")
+        )
+      ),
+      step==="s1" && h(Fragment, null,
+        h('p', { style:{fontSize:14,color:C.textMid,margin:"0 0 1rem"} }, "Choose a PIN (min 4 digits)."),
+        h(Field, { label:"New PIN" },
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('button', { className:"primary", onClick:()=>{if(p1.length<4){setErr("Min 4 digits.");}else{setErr("");setStep("s2");}}, style:{width:"100%",padding:"12px"} }, "Next →")
+      ),
+      step==="s2" && h(Fragment, null,
+        h(Field, { label:"Confirm PIN" },
+          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value), onKeyDown:e=>e.key==="Enter"&&setPin(), placeholder:"••••••" })
+        ),
+        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+        h('div', { style:{display:"flex",gap:8} },
+          h('button', { onClick:()=>{setStep("s1");setErr("");}, style:{flex:1} }, "← Back"),
+          h('button', { className:"primary", onClick:setPin, style:{flex:2} }, "Set PIN & sign in")
+        )
+      )
+    )
+  );
+}
+
+// ─── Employee Screen ──────────────────────────────────────────────────────────
+function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+  const [tab, setTab] = useState("balance");
+  const [msg, setMsg] = useState("");
+  const [showChangePin, setShowChangePin] = useState(false);
+
+  const balance=calcBalance(emp), eoy=calcEOYBalance(emp), scheduled=calcScheduled(emp);
+  const pty=currentPTOYear();
+  const accrued=calcAccruedInYear(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
+  const eoyAcc=calcAccruedEOY(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
+  const taken=calcTakenYTD(emp), nextRollover=calcNextRollover(emp);
+  const annualAllotment=getAccrualRate(emp.hireDate,emp.ptoOverride||null);
+  const wklyRate=weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null);
+  const hireYrs=((new Date()-new Date(emp.hireDate))/(1000*60*60*24*365.25)).toFixed(1);
+
+  function flash(m) { setMsg(m); setTimeout(()=>setMsg(""),5000); }
+  async function saveEntry(data, editId) {
+    let entries=[...(emp.entries||[])];
+    if (editId) entries=entries.map(e=>e.id===editId?{...e,...data}:e);
+    else entries=[...entries,{...data,id:Date.now()}];
+    await persist(staff.map(s=>s.name===emp.name?{...s,entries}:s));
+    flash("Entry saved!");
+  }
+  async function delEntry(id) {
+    await persist(staff.map(s=>s.name===emp.name?{...s,entries:(s.entries||[]).filter(e=>e.id!==id)}:s));
+    flash("Entry removed.");
+  }
+  async function saveNewPin(newPin) {
+    await persist(staff.map(s=>s.name===emp.name?{...s,pin:hashPin(newPin)}:s));
+    setShowChangePin(false);
+    flash("PIN updated successfully!");
+  }
+
+  const statCards = [
+    {label:"Annual PTO Allotment",   value:`${annualAllotment} hrs/yr`,   color:C.accentText},
+    {label:"Weekly Accrual Rate",    value:`${fmt(wklyRate)} hrs/wk`,      color:C.text},
+    {label:"Rollover (from last yr)",value:`${fmt(emp.rolloverHours||0)} hrs`, color:C.text},
+    {label:"Accrued YTD",            value:`${fmt(accrued)} hrs`,           color:C.text},
+    {label:"Taken YTD",              value:`${fmt(taken)} hrs`,             color:C.amberText},
+    {label:"Upcoming Scheduled",     value:`${fmt(scheduled)} hrs`,         color:C.greenText},
+    {label:"Est. Rollover Next Year",value:`${fmt(nextRollover)} hrs`,      color:nextRollover>=ROLLOVER_CAP?C.amber:C.textMid}
+  ];
+
+  return h('div', { style:{maxWidth:560,margin:"0 auto",padding:"1.5rem 1rem",minHeight:"100vh"} },
+    showChangePin && h(ChangePinModal, { emp, onClose:()=>setShowChangePin(false), onSave:saveNewPin }),
+    h(TopBar, { title:emp.name,
+      sub:`${hireYrs} yrs · ${emp.weeklyHours}h/wk${emp.ptoOverride?" · Override: "+emp.ptoOverride+"h/yr":""}`,
+      onSignOut, onChangePin:()=>setShowChangePin(true) }),
+    msg && h('div', { style:{background:`${C.green}22`,border:`1px solid ${C.green}44`,borderRadius:10,padding:"10px 16px",margin:"0 0 1rem",fontSize:14,color:C.greenText,fontWeight:500,textAlign:"center"} }, msg),
+    h(EmpTabBar, { active:tab, onChange:t=>setTab(t) }),
+    tab==="balance" && h(Fragment, null,
+      h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:"1rem"} },
+        h(Card, { style:{display:"flex",justifyContent:"center"} },
+          h(Donut, { value:balance, max:Math.max(eoy,balance,1), label:"Balance today", sub:"current", color:C.accent })
+        ),
+        h(Card, { style:{display:"flex",justifyContent:"center"} },
+          h(Donut, { value:eoy, max:Math.max(eoy,balance,1), label:"Est. end of year", sub:"if no more taken", color:C.green })
+        )
+      ),
+      h(Card, { style:{marginBottom:"1rem"} },
+        h('p', { style:{margin:"0 0 1rem",fontSize:11,fontWeight:600,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.07em"} }, "PTO year at a glance (Jan 2 – Jan 1)"),
+        h(Timeline, { accrued, eoy:eoyAcc, taken, scheduled, rollover:emp.rolloverHours||0 })
+      ),
+      h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8} },
+        statCards.map(({label,value,color}) =>
+          h('div', { key:label, style:{background:C.card2,borderRadius:12,padding:"0.75rem 1rem",border:`1px solid ${C.border}`} },
+            h('div', { style:{fontSize:10,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4} }, label),
+            h('div', { style:{fontSize:15,fontWeight:600,color} }, value)
+          )
+        )
+      ),
+      nextRollover>=ROLLOVER_CAP && eoy>ROLLOVER_CAP &&
+        h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:10,padding:"10px 14px",marginTop:"1rem"} },
+          h('p', { style:{margin:0,fontSize:13,color:C.amberText} }, `⚠ Rollover cap: you may lose ${fmt(Math.max(0,eoy-ROLLOVER_CAP))} hrs at year-end.`)
+        ),
+      balance>=0 && balance<8 &&
+        h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:10,padding:"10px 14px",marginTop:"1rem"} },
+          h('p', { style:{margin:0,fontSize:13,color:C.amberText} }, "⚠ Low balance — less than 8 hours remaining.")
+        ),
+      balance<0 &&
+        h('div', { style:{background:`${C.red}18`,border:`1px solid ${C.redDim}`,borderRadius:10,padding:"10px 14px",marginTop:"1rem"} },
+          h('p', { style:{margin:0,fontSize:13,color:C.redText} }, "⚠ Negative balance — please contact your admin.")
+        ),
+      h(ProjectedBalance, { emp })
+    ),
+    tab==="log" && h(Card, null,
+      h('h3', { style:{margin:"0 0 1.25rem",fontSize:16,fontWeight:600} }, "Log PTO"),
+      h(EntryForm, { balance, weeklyHours:emp.weeklyHours, onSave:d=>{saveEntry(d);setTab("balance");}, onCancel:()=>setTab("balance") })
+    ),
+    tab==="history" && h(HistoryView, { emp, balance, onSave:saveEntry, onDelete:delEntry }),
+    tab==="calendar" && h(MiniCalendar, { entries:emp.entries, isAdmin:false })
+  );
+}
+
+// ─── Admin Screen ─────────────────────────────────────────────────────────────
+function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+  const [tab, setTab] = useState("overview");
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({});
+  const [newName, setNewName] = useState("");
+  const [msg, setMsg] = useState("");
+  const [pinPanel, setPinPanel] = useState(false);
+  const [np, setNp] = useState("");
+  const [cp, setCp] = useState("");
+  const [pinErr, setPinErr] = useState("");
+  const [adjEmp, setAdjEmp] = useState(null);
+
+  function flash(m) { setMsg(m); setTimeout(()=>setMsg(""),4000); }
+  function startEdit(emp) {
+    setEditing(emp.name);
+    setForm({ name:emp.name, hireDate:emp.hireDate, weeklyHours:emp.weeklyHours,
+      rolloverHours:emp.rolloverHours||0, ptoOverride:emp.ptoOverride||"", newPin:"" });
+  }
+  async function saveEdit() {
+    const updates = { name:form.name, hireDate:form.hireDate,
+      weeklyHours:parseFloat(form.weeklyHours)||40, rolloverHours:parseFloat(form.rolloverHours)||0,
+      ptoOverride:form.ptoOverride?parseFloat(form.ptoOverride):null };
+    if (form.newPin && form.newPin.length>=4) updates.pin = hashPin(form.newPin);
+    await persist(staff.map(e=>e.name===editing?{...e,...updates}:e));
+    setEditing(null); flash("Saved.");
+  }
+  async function addEmployee() {
+    if (!newName.trim()) return;
+    await persist([...staff,{name:newName.trim(),pin:null,hireDate:new Date().toISOString().split("T")[0],weeklyHours:40,ptoOverride:null,rolloverHours:0,entries:[]}]);
+    setNewName(""); flash("Employee added.");
+  }
+  async function resetPin(name) {
+    await persist(staff.map(e=>e.name===name?{...e,pin:null}:e));
+    flash(`PIN reset for ${name}.`);
+  }
+  async function changeAdminPin() {
+    if (np.length<4) { setPinErr("Min 4 digits."); return; }
+    if (np!==cp) { setPinErr("Don't match."); return; }
+    await persist(staff, np); setPinPanel(false); setNp(""); setCp(""); flash("Admin PIN updated.");
+  }
+  async function saveAdminEntry(empName, data) {
+    await persist(staff.map(s=>s.name===empName?{...s,entries:[...(s.entries||[]),{...data,id:Date.now(),addedBy:"admin"}]}:s));
+    setAdjEmp(null); flash(`Entry added for ${empName}`);
+  }
+  async function deleteEmpEntry(empName, id) {
+    await persist(staff.map(s=>s.name===empName?{...s,entries:(s.entries||[]).filter(e=>e.id!==id)}:s));
+    flash("Entry removed.");
+  }
+
+  const overviewData = staff.map(emp => ({
+    name:emp.name, lastName:lastName(emp.name),
+    available:calcBalance(emp), eoy:calcEOYBalance(emp),
+    accrued:calcAccruedInYear(emp.hireDate,emp.weeklyHours,currentPTOYear(),emp.ptoOverride||null),
+    taken:calcTakenYTD(emp), scheduled:calcScheduled(emp),
+    allotment:getAccrualRate(emp.hireDate,emp.ptoOverride||null),
+    wklyRate:weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null),
+    nextRollover:calcNextRollover(emp), ptoOverride:emp.ptoOverride||null, _emp:emp
+  }));
+
+  const {sorted:ovSorted, col:ovCol, dir:ovDir, onSort:ovSort} = useSort(overviewData, "lastName", "asc");
+
+  const summaryCards = [
+    {l:"Staff",          v:staff.length,                                                     s:"employees",   c:C.text},
+    {l:"Available now",  v:fmt(ovSorted.reduce((a,r)=>a+r.available,0)),                     s:"total hours", c:C.accentText},
+    {l:"Est. total EOY", v:fmt(ovSorted.reduce((a,r)=>a+r.eoy,0)),                           s:"total hours", c:C.greenText}
+  ];
+
+  return h('div', { style:{maxWidth:900,margin:"0 auto",padding:"1.5rem 1rem",minHeight:"100vh"} },
+    h(TopBar, { title:"Admin dashboard", sub:`${staff.length} employees · PTO Year ${currentPTOYear()}`, onSignOut }),
+    msg && h('div', { style:{background:`${C.green}22`,border:`1px solid ${C.green}44`,borderRadius:10,padding:"8px 14px",marginBottom:"1rem",fontSize:13,color:C.greenText} }, msg),
+    h(AdminTabBar, { active:tab, onChange:setTab }),
+
+    // ── Overview tab ──
+    tab==="overview" && h(Fragment, null,
+      h('div', { style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:"1.25rem"} },
+        summaryCards.map(({l,v,s,c}) =>
+          h('div', { key:l, style:{background:C.card2,borderRadius:12,padding:"1rem",border:`1px solid ${C.border}`,textAlign:"center"} },
+            h('div', { style:{fontSize:10,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6} }, l),
+            h('div', { style:{fontSize:22,fontWeight:700,color:c} }, v),
+            h('div', { style:{fontSize:11,color:C.textDim,marginTop:2} }, s)
+          )
+        )
+      ),
+      h('p', { style:{fontSize:11,color:C.textDim,margin:"0 0 8px"} }, "Click any column header to sort · ★ = PTO override"),
+      h(Card, { style:{padding:0,overflow:"hidden"} },
+        h('div', { style:{overflowX:"auto"} },
+          h('table', { style:{width:"100%",borderCollapse:"collapse",fontSize:12} },
+            h('thead', null, h('tr', { style:{background:C.card2} },
+              h(SortTh, { col:"lastName",    label:"Employee",    sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"available",   label:"Available",   sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"eoy",         label:"Est. EOY",    sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"accrued",     label:"Accrued YTD", sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"taken",       label:"Taken",       sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"scheduled",   label:"Scheduled",   sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"allotment",   label:"Allotment/yr",sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"wklyRate",    label:"Wkly Rate",   sortCol:ovCol, sortDir:ovDir, onSort:ovSort }),
+              h(SortTh, { col:"nextRollover",label:"Est. Rollover",sortCol:ovCol, sortDir:ovDir, onSort:ovSort })
+            )),
+            h('tbody', null,
+              ovSorted.map((r,i) =>
+                h('tr', { key:r.name, style:{borderTop:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2} },
+                  h('td', { style:{padding:"10px"} },
+                    h('div', { style:{display:"flex",alignItems:"center",gap:8} },
+                      h(Avatar, { name:r.name, size:24 }),
+                      h('span', { style:{fontWeight:500,color:C.text,whiteSpace:"nowrap"} }, r.name),
+                      r.ptoOverride && h('span', { style:{fontSize:10,padding:"1px 5px",borderRadius:4,background:`${C.accent}33`,color:C.accentText} }, "★"),
+                      !r._emp.pin && h('span', { style:{fontSize:10,padding:"1px 6px",borderRadius:5,background:`${C.amberDim}88`,color:C.amberText} }, "no PIN")
+                    )
+                  ),
+                  h('td', { style:{padding:"10px",fontWeight:600,color:r.available<8?C.red:C.accentText} }, fmt(r.available)),
+                  h('td', { style:{padding:"10px",color:C.greenText,fontWeight:500} }, fmt(r.eoy)),
+                  h('td', { style:{padding:"10px",color:C.text} }, fmt(r.accrued)),
+                  h('td', { style:{padding:"10px",color:C.amberText} }, fmt(r.taken)),
+                  h('td', { style:{padding:"10px",color:C.greenText} }, fmt(r.scheduled)),
+                  h('td', { style:{padding:"10px",color:C.text} }, r.allotment),
+                  h('td', { style:{padding:"10px",color:C.textMid} }, fmt(r.wklyRate)),
+                  h('td', { style:{padding:"10px",color:r.nextRollover>=ROLLOVER_CAP?C.amber:C.textMid} },
+                    fmt(r.nextRollover), r.nextRollover>=ROLLOVER_CAP?" ⚠":"")
+                )
+              )
+            )
+          )
+        )
+      )
+    ),
+
+    // ── Manage tab ──
+    tab==="manage" && h(Fragment, null,
+      [...staff].sort((a,b)=>lastName(a.name).localeCompare(lastName(b.name))).map(emp =>
+        h(Card, { key:emp.name, style:{marginBottom:8} },
+          adjEmp===emp.name && editing!==emp.name
+            ? h('div', null,
+                h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"} },
+                  h('div', { style:{display:"flex",alignItems:"center",gap:10} },
+                    h(Avatar, { name:emp.name, size:32 }),
+                    h('span', { style:{fontWeight:600} }, emp.name)
+                  ),
+                  h('button', { className:"ghost", onClick:()=>setAdjEmp(null), style:{fontSize:12} }, "Cancel")
+                ),
+                h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 8px"} }, "Existing entries:"),
+                (emp.entries||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e =>
+                  h('div', { key:e.id, style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:C.card2,borderRadius:8,marginBottom:4,fontSize:12} },
+                    h('span', { style:{color:C.text} }, `${e.date} · ${fmt(e.hours)}h · `, h('span', { style:{color:C.textMid} }, e.type), e.note?` · ${e.note}`:""),
+                    h('button', { className:"danger", onClick:()=>deleteEmpEntry(emp.name,e.id), style:{fontSize:11,padding:"2px 8px"} }, "×")
+                  )
+                ),
+                h('div', { style:{borderTop:`1px solid ${C.border}`,marginTop:"1rem",paddingTop:"1rem"} },
+                  h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 10px"} }, "Add new entry:"),
+                  h(EntryForm, { balance:calcBalance(emp), weeklyHours:emp.weeklyHours, onSave:d=>saveAdminEntry(emp.name,d), onCancel:()=>setAdjEmp(null) })
+                )
+              )
+            : editing===emp.name
+              ? h('div', null,
+                  h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10} },
+                    h(Field, { label:"Name" }, h('input', { value:form.name, onChange:e=>setForm({...form,name:e.target.value}) })),
+                    h(Field, { label:"Hire date" }, h('input', { type:"date", value:form.hireDate, onChange:e=>setForm({...form,hireDate:e.target.value}) })),
+                    h(Field, { label:"Weekly hours" }, h('input', { type:"number", min:"1", max:"80", step:"0.01", value:form.weeklyHours, onChange:e=>setForm({...form,weeklyHours:e.target.value}) })),
+                    h(Field, { label:"Rollover hrs" }, h('input', { type:"number", step:"0.01", value:form.rolloverHours, onChange:e=>setForm({...form,rolloverHours:e.target.value}) })),
+                    h(Field, { label:"PTO override (hrs/yr)", hint:"Leave blank for tenure-based" }, h('input', { type:"number", step:"1", value:form.ptoOverride, onChange:e=>setForm({...form,ptoOverride:e.target.value}), placeholder:"e.g. 256" })),
+                    h(Field, { label:"Set PIN", hint:"Min 4 digits. Leave blank to keep existing." }, h('input', { type:"password", maxLength:8, value:form.newPin||"", onChange:e=>setForm({...form,newPin:e.target.value}), placeholder:"New PIN" }))
+                  ),
+                  h('div', { style:{display:"flex",gap:8,marginTop:10} },
+                    h('button', { className:"primary", onClick:saveEdit, style:{flex:2} }, "Save"),
+                    h('button', { onClick:()=>setEditing(null), style:{flex:1} }, "Cancel")
+                  )
+                )
+              : h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center"} },
+                  h('div', { style:{display:"flex",alignItems:"center",gap:12} },
+                    h(Avatar, { name:emp.name, size:36 }),
+                    h('div', null,
+                      h('div', { style:{fontWeight:600,fontSize:14,color:C.text} }, emp.name),
+                      h('div', { style:{fontSize:12,color:C.textMid} },
+                        `Hired ${emp.hireDate} · ${emp.weeklyHours}h/wk · ${getAccrualRate(emp.hireDate,emp.ptoOverride||null)}h/yr`,
+                        emp.ptoOverride?" ★":"",
+                        !emp.pin && h('span', { style:{marginLeft:8,color:C.amberText} }, "· no PIN")
+                      )
+                    )
+                  ),
+                  h('div', { style:{display:"flex",gap:6} },
+                    h('button', { onClick:()=>{setAdjEmp(emp.name);setEditing(null);}, style:{fontSize:12,padding:"5px 10px"} }, "Entries"),
+                    h('button', { onClick:()=>{startEdit(emp);setAdjEmp(null);}, style:{fontSize:12,padding:"5px 10px"} }, "Edit"),
+                    h('button', { className:"danger", onClick:()=>resetPin(emp.name), style:{fontSize:12,padding:"5px 10px"} }, "Reset PIN")
+                  )
+                )
+        )
+      ),
+      h(Card, { style:{marginTop:"0.75rem"} },
+        h('h3', { style:{margin:"0 0 0.75rem",fontSize:15,fontWeight:600} }, "Add employee"),
+        h(Field, { label:"Full name" },
+          h('input', { value:newName, onChange:e=>setNewName(e.target.value), placeholder:"e.g. Jane Smith",
+            onKeyDown:e=>e.key==="Enter"&&addEmployee() })
+        ),
+        h('button', { className:"primary", onClick:addEmployee, style:{width:"100%"} }, "Add employee")
+      )
+    ),
+
+    // ── Report tab ──
+    tab==="report" && h(ReportView, { staff, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover }),
+
+    // ── Calendar tab ──
+    tab==="calendar" && h(MiniCalendar, { isAdmin:true, allStaff:staff }),
+
+    // ── Settings tab ──
+    tab==="settings" && h(Card, null,
+      h('h3', { style:{margin:"0 0 1rem",fontSize:15,fontWeight:600} }, "Admin PIN"),
+      !pinPanel
+        ? h('button', { onClick:()=>setPinPanel(true) }, "Change admin PIN")
+        : h('div', { style:{display:"flex",flexDirection:"column",gap:10} },
+            h(Field, { label:"New PIN" }, h('input', { type:"password", maxLength:8, value:np, onChange:e=>setNp(e.target.value), placeholder:"••••••" })),
+            h(Field, { label:"Confirm PIN" }, h('input', { type:"password", maxLength:8, value:cp, onChange:e=>setCp(e.target.value), placeholder:"••••••" })),
+            pinErr && h('p', { style:{color:C.red,fontSize:13,margin:0} }, pinErr),
+            h('div', { style:{display:"flex",gap:8} },
+              h('button', { className:"primary", onClick:changeAdminPin, style:{flex:2} }, "Save PIN"),
+              h('button', { onClick:()=>setPinPanel(false), style:{flex:1} }, "Cancel")
+            )
+          ),
+      h('div', { style:{borderTop:`1px solid ${C.border}`,marginTop:"1.5rem",paddingTop:"1.5rem"} },
+        h('h3', { style:{margin:"0 0 0.5rem",fontSize:15,fontWeight:600} }, "Accrual policy"),
+        h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 0.75rem"} }, `PTO year: Jan 2 – Jan 1 · Rollover cap: ${ROLLOVER_CAP} hrs · Min PTO: ${MIN_PTO_HOURS} hrs`),
+        ACCRUAL_RATES.map((r,i) =>
+          h('div', { key:i, style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`,fontSize:13} },
+            h('span', { style:{color:C.textMid} }, r.maxYears===Infinity?`${r.minYears}+ yrs`:`${r.minYears}–${r.maxYears} yrs`),
+            h('span', { style:{fontWeight:600,color:C.text} }, `${r.hoursPerYear} hrs / yr`)
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Root App ─────────────────────────────────────────────────────────────────
+function App() {
+  const [ready, setReady] = useState(false);
+  const [staff, setStaff] = useState([]);
+  const [adminPin, setAdminPin] = useState(DEFAULT_ADMIN_PIN);
+  const [view, setView] = useState("home");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [selectedName, setSelectedName] = useState("");
+  const [setupMode, setSetupMode] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await dbGet();
+        if (d && d.staff && d.staff.length > 0) {
+          setStaff(d.staff||[]);
+          setAdminPin(d.adminPin||DEFAULT_ADMIN_PIN);
+        } else {
+          const initial = buildInitialStaff();
+          await dbSet({ staff:initial, adminPin:DEFAULT_ADMIN_PIN });
+          setStaff(initial);
+        }
+      } catch(e) { console.error("Load error:", e); }
+      setReady(true);
+    })();
+  }, []);
+
+  const persist = useCallback(async (ns, np) => {
+    const ap = np ?? adminPin;
+    await dbSet({ staff:ns, adminPin:ap });
+    setStaff(ns);
+    if (np) setAdminPin(np);
+  }, [adminPin]);
+
+  const calcBalance = emp => {
+    if (!emp) return 0;
+    const pty=currentPTOYear(),
+      acc=calcAccruedInYear(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null),
+      now=new Date(),
+      taken=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&e.type==="taken"&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0),
+      adj=(emp.entries||[]).filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
+    return (emp.rolloverHours||0)+acc-taken+adj;
+  };
+
+  const calcEOYBalance = emp => {
+    if (!emp) return 0;
+    const pty=currentPTOYear(),
+      acc=calcAccruedEOY(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null),
+      allPTO=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&(e.type==="taken"||e.type==="scheduled")).reduce((a,e)=>a+e.hours,0),
+      adj=(emp.entries||[]).filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
+    return (emp.rolloverHours||0)+acc-allPTO+adj;
+  };
+
+  const calcNextRollover = emp => Math.min(Math.max(0, calcEOYBalance(emp)), ROLLOVER_CAP);
+
+  const calcScheduled = emp => {
+    const now=new Date();
+    return (emp.entries||[]).filter(e=>new Date(e.date+"T12:00:00")>now&&e.type==="scheduled").reduce((a,e)=>a+e.hours,0);
+  };
+
+  const emp = staff.find(s=>s.name===currentUser);
+
+  if (!ready) return h('div', { style:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"} },
+    h('p', { style:{color:C.textMid,fontSize:16} }, "Loading…")
+  );
+
+  return h(Fragment, null,
+    view==="home" && h(HomeScreen, { staff, adminPin, onEmployee:(n,s)=>{setSelectedName(n);setSetupMode(s);setView("login");}, onAdmin:()=>setView("admin") }),
+    view==="login" && h(LoginScreen, { name:selectedName, staff, setupMode, persist, onSuccess:()=>{setCurrentUser(selectedName);setView("employee");}, onBack:()=>setView("home") }),
+    view==="employee" && emp && h(EmployeeScreen, { emp, staff, persist, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut:()=>{setCurrentUser(null);setView("home");} }),
+    view==="admin" && h(AdminScreen, { staff, persist, adminPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut:()=>setView("home") })
+  );
+}
+
+ReactDOM.render(h(App), document.getElementById('root'));
+</script>
+</body>
+</html>
