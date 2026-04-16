@@ -92,40 +92,6 @@ const C = {
   text:"#f1f5f9", textMid:"#94a3b8", textDim:"#475569"
 };
 
-// ─── Staff seed data ──────────────────────────────────────────────────────────
-const REAL_STAFF = [
-  {name:"Liza Boyle",         hireDate:"2023-10-23", weeklyHours:30, ptoOverride:null,  rolloverHours:47.98,  takenYTD:57.5},
-  {name:"Cathleen Branon-Keogh", hireDate:"2023-02-01", weeklyHours:40, ptoOverride:null, rolloverHours:8.16,  takenYTD:79},
-  {name:"Walker Calderwood",  hireDate:"2014-06-16", weeklyHours:40, ptoOverride:null,  rolloverHours:-6.49,  takenYTD:98.75},
-  {name:"Lauren Hagen",       hireDate:"2020-03-23", weeklyHours:32, ptoOverride:null,  rolloverHours:1.79,   takenYTD:36.75},
-  {name:"Eric Hauser",        hireDate:"2009-05-26", weeklyHours:40, ptoOverride:null,  rolloverHours:29.54,  takenYTD:23.5},
-  {name:"Riazul Hoque",       hireDate:"2023-03-13", weeklyHours:40, ptoOverride:null,  rolloverHours:-27.61, takenYTD:10.35},
-  {name:"Krystina Kattermann",hireDate:"2018-09-24", weeklyHours:40, ptoOverride:null,  rolloverHours:51.1,   takenYTD:20.45},
-  {name:"Michael LaCrosse",   hireDate:"2021-09-20", weeklyHours:40, ptoOverride:280,   rolloverHours:39.53,  takenYTD:27},
-  {name:"Charlie Maitland",   hireDate:"2024-05-28", weeklyHours:40, ptoOverride:null,  rolloverHours:23.65,  takenYTD:24},
-  {name:"Katie Mason",        hireDate:"2012-07-16", weeklyHours:40, ptoOverride:null,  rolloverHours:66.5,   takenYTD:69.75},
-  {name:"Sophia Mazzone",     hireDate:"2025-06-10", weeklyHours:40, ptoOverride:null,  rolloverHours:10.07,  takenYTD:48},
-  {name:"Eric Morrow",        hireDate:"2024-01-08", weeklyHours:40, ptoOverride:256,   rolloverHours:40,     takenYTD:71.8},
-  {name:"Carrie Napolitan",   hireDate:"2024-03-11", weeklyHours:28, ptoOverride:null,  rolloverHours:18.98,  takenYTD:12},
-  {name:"Rachael Straub",     hireDate:"2016-12-05", weeklyHours:40, ptoOverride:null,  rolloverHours:9.77,   takenYTD:12},
-  {name:"Alan Therrien",      hireDate:"2023-02-27", weeklyHours:40, ptoOverride:null,  rolloverHours:16.21,  takenYTD:10},
-  {name:"Daniel Tuhus-Dubrow",hireDate:"2017-03-02", weeklyHours:30, ptoOverride:null,  rolloverHours:-17.05, takenYTD:10.5},
-  {name:"Wil Yandell",        hireDate:"2026-01-12", weeklyHours:40, ptoOverride:256,   rolloverHours:0,      takenYTD:26.25},
-];
-
-function buildInitialStaff() {
-  const goLive = new Date().toISOString().split("T")[0];
-  return REAL_STAFF.map(s => ({
-    name: s.name, pin: null, hireDate: s.hireDate,
-    weeklyHours: s.weeklyHours, ptoOverride: s.ptoOverride,
-    rolloverHours: s.rolloverHours,
-    entries: s.takenYTD > 0
-      ? [{ id: Date.now() + Math.random(), type: "adjustment", date: goLive,
-           hours: -r2(s.takenYTD), note: "PTO taken prior to system go-live (imported)", addedBy: "admin" }]
-      : []
-  }));
-}
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 function getPTOYear(dateStr) {
   const d = new Date(dateStr + "T12:00:00");
@@ -1313,13 +1279,9 @@ function App() {
     (async () => {
       try {
         const d = await dbGet();
-        if (d && d.staff && d.staff.length > 0) {
+        if (d && d.staff) {
           setStaff(d.staff||[]);
           setAdminPin(d.adminPin||DEFAULT_ADMIN_PIN);
-        } else {
-          const initial = buildInitialStaff();
-          await dbSet({ staff:initial, adminPin:DEFAULT_ADMIN_PIN });
-          setStaff(initial);
         }
       } catch(e) { console.error("Load error:", e); }
       setReady(true);
