@@ -106,8 +106,17 @@ function getAccrualRate(hireDate, ptoOverride) {
   const years = (new Date() - new Date(hireDate)) / (1000*60*60*24*365.25);
   return (ACCRUAL_RATES.find(r => years >= r.minYears && years < r.maxYears) || ACCRUAL_RATES[ACCRUAL_RATES.length-1]).hoursPerYear;
 }
+// Returns the effective annual allotment for display -- prorated for part-time
+// unless an override is set (overrides are already the prorated annual figure)
+function annualAllotmentDisplay(hireDate, weeklyHours, ptoOverride) {
+  if (ptoOverride) return ptoOverride;
+  const fullTimeRate = getAccrualRate(hireDate, null);
+  return r2(fullTimeRate * (weeklyHours / 40));
+}
 function weeklyAccrual(hireDate, weeklyHours, ptoOverride) {
-  return (getAccrualRate(hireDate, ptoOverride) / 52) * (weeklyHours / 40);
+  // If override is set it already represents the prorated annual hours -- don't scale again
+  if (ptoOverride) return ptoOverride / 52;
+  return (getAccrualRate(hireDate, null) / 52) * (weeklyHours / 40);
 }
 function calcAccruedInYear(hireDate, weeklyHours, year, ptoOverride) {
   const now = new Date(), start = new Date(year, 0, 2);
@@ -707,7 +716,7 @@ function ReportView({staff, calcBalance, calcEOYBalance, calcScheduled, calcNext
   const reportData = staff.filter(s=>selected.includes(s.name)).map(emp=>({
     name:emp.name, lastName:lastName(emp.name), hireDate:emp.hireDate,
     weeklyHours:emp.weeklyHours,
-    annualAllotment:getAccrualRate(emp.hireDate,emp.ptoOverride||null),
+    annualAllotment:annualAllotmentDisplay(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null),
     weeklyRate:fmt(weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null)),
     rollover:fmt(emp.rolloverHours||0),
     accruedYTD:fmt(calcAccruedInYear(emp.hireDate,emp.weeklyHours,currentPTOYear(),emp.ptoOverride||null)),
@@ -951,7 +960,7 @@ function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcS
   const accrued=calcAccruedInYear(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
   const eoyAcc=calcAccruedEOY(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
   const taken=calcTakenYTD(emp), nextRollover=calcNextRollover(emp);
-  const annualAllotment=getAccrualRate(emp.hireDate,emp.ptoOverride||null);
+  const annualAllotment=annualAllotmentDisplay(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null);
   const wklyRate=weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null);
   const hireYrs=((new Date()-new Date(emp.hireDate))/(1000*60*60*24*365.25)).toFixed(1);
 
@@ -1089,7 +1098,7 @@ function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, cal
     available:calcBalance(emp), eoy:calcEOYBalance(emp),
     accrued:calcAccruedInYear(emp.hireDate,emp.weeklyHours,currentPTOYear(),emp.ptoOverride||null),
     taken:calcTakenYTD(emp), scheduled:calcScheduled(emp),
-    allotment:getAccrualRate(emp.hireDate,emp.ptoOverride||null),
+    allotment:annualAllotmentDisplay(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null),
     wklyRate:weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null),
     nextRollover:calcNextRollover(emp), ptoOverride:emp.ptoOverride||null, _emp:emp
   }));
@@ -1207,7 +1216,7 @@ function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, cal
                     h('div', null,
                       h('div', { style:{fontWeight:600,fontSize:14,color:C.text} }, emp.name),
                       h('div', { style:{fontSize:12,color:C.textMid} },
-                        `Hired ${emp.hireDate} · ${emp.weeklyHours}h/wk · ${getAccrualRate(emp.hireDate,emp.ptoOverride||null)}h/yr`,
+                        `Hired ${emp.hireDate} · ${emp.weeklyHours}h/wk · ${annualAllotmentDisplay(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null)}h/yr`,
                         emp.ptoOverride?" ★":"",
                         !emp.pin && h('span', { style:{marginLeft:8,color:C.amberText} }, "· no PIN")
                       )
