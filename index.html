@@ -1020,7 +1020,7 @@ function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcS
           )
         )
       ),
-      nextRollover>=ROLLOVER_CAP && eoy>ROLLOVER_CAP &&
+      nextRollover>=ROLLOVER_CAP && eoy>ROLLOVER_CAP && (new Date().getMonth()>=9||new Date().getMonth()===0) &&
         h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:10,padding:"10px 14px",marginTop:"1rem"} },
           h('p', { style:{margin:0,fontSize:13,color:C.amberText} }, `⚠ Rollover cap: you may lose ${fmt(Math.max(0,eoy-ROLLOVER_CAP))} hrs at year-end.`)
         ),
