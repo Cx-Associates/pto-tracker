@@ -44,37 +44,29 @@ window.onerror = function(msg, src, line, col, err) {
 const {createElement:h, useState, useEffect, useCallback, useMemo, Fragment} = React;
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const SUPABASE_URL = "https://ykddpajaqftrcmmhizoq.supabase.co";
-const SUPABASE_KEY = "sb_publishable_Y-Jzj8i4_FDJeg6pRSOkpw_p7q1BGlE";
+const EDGE_FN_URL = "https://ykddpajaqftrcmmhizoq.supabase.co/functions/v1/smart-handler";
+const ANON_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlrZGRwYWphcWZ0cmNtbWhpem9xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNjE2MzAsImV4cCI6MjA5MTczNzYzMH0.Fot5HVwmNwg4tamCMJ13l8iC6Zj6VPMww_NHrdqpB9w";
 
-async function dbGet() {
+async function callApi(action, payload={}) {
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/pto_data?id=eq.main&select=data`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-    );
-    const rows = await res.json();
-    return rows?.[0]?.data || null;
-  } catch(e) { console.error("dbGet error:", e); return null; }
-}
-
-async function dbSet(data) {
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/pto_data`, {
+    const res = await fetch(EDGE_FN_URL, {
       method: "POST",
       headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal"
+        "Authorization": `Bearer ${ANON_JWT}`
       },
-      body: JSON.stringify({ id: "main", data, updated_at: new Date().toISOString() })
+      body: JSON.stringify({ action, ...payload })
     });
-  } catch(e) { console.error("dbSet error:", e); }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  } catch(e) {
+    console.error(`callApi(${action}) error:`, e);
+    throw e;
+  }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const DEFAULT_ADMIN_PIN = "1234";
 const ACCRUAL_RATES = [
   { minYears:0, maxYears:4,        hoursPerYear:240 },
   { minYears:4, maxYears:8,        hoursPerYear:256 },
@@ -806,11 +798,37 @@ function ReportView({staff, calcBalance, calcEOYBalance, calcScheduled, calcNext
 }
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
-function HomeScreen({staff, adminPin, onEmployee, onAdmin}) {
+// staffNames: [{name, hasPin}] — no sensitive data, from bootstrap
+// onAdmin: async fn that accepts pin, returns error string or undefined
+// onAdminSetup: async fn for first-time admin PIN creation
+function HomeScreen({staffNames, needsAdminSetup, onEmployee, onAdmin, onAdminSetup}) {
   const [name, setName] = useState("");
   const [adminMode, setAdminMode] = useState(false);
+  const [setupMode, setSetupMode] = useState(false);
   const [adminPin_, setAdminPin_] = useState("");
+  const [setupPin1, setSetupPin1] = useState("");
+  const [setupPin2, setSetupPin2] = useState("");
+  const [setupStep, setSetupStep] = useState(1);
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleAdminLogin() {
+    setLoading(true); setErr("");
+    const errMsg = await onAdmin(adminPin_);
+    if (errMsg) setErr(errMsg);
+    setLoading(false);
+  }
+
+  async function handleAdminSetup() {
+    if (setupPin1.length < 4) { setErr("Min 4 digits."); return; }
+    if (setupPin1 !== setupPin2) { setErr("PINs don't match."); return; }
+    setLoading(true); setErr("");
+    const errMsg = await onAdminSetup(setupPin1);
+    if (errMsg) setErr(errMsg);
+    setLoading(false);
+  }
+
+  const sortedNames = [...staffNames].sort((a,b) => lastName(a.name).localeCompare(lastName(b.name)));
 
   return h('div', { style:{maxWidth:420,margin:"0 auto",padding:"3rem 1rem",minHeight:"100vh"} },
     h('div', { style:{textAlign:"center",marginBottom:"2.5rem"} },
@@ -822,58 +840,113 @@ function HomeScreen({staff, adminPin, onEmployee, onAdmin}) {
       h(Field, { label:"Your name" },
         h('select', { value:name, onChange:e=>setName(e.target.value) },
           h('option', { value:"" }, "— choose —"),
-          [...staff].sort((a,b)=>lastName(a.name).localeCompare(lastName(b.name))).map(e =>
-            h('option', { key:e.name }, e.name)
-          )
+          sortedNames.map(e => h('option', { key:e.name }, e.name))
         )
       ),
-      err && !adminMode && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+      err && !adminMode && !setupMode && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
       h('button', { className:"primary", onClick:()=>{
         if (!name) { setErr("Select your name."); return; }
         setErr("");
-        const e = staff.find(s=>s.name===name);
-        onEmployee(name, !e?.pin);
+        const entry = staffNames.find(s=>s.name===name);
+        onEmployee(name, entry?.hasPin ?? true);
       }, style:{width:"100%",padding:"12px"} }, "Continue →")
     ),
     h(Card, null,
-      !adminMode
-        ? h('button', { className:"ghost", onClick:()=>setAdminMode(true), style:{fontSize:13,padding:"4px 0"} }, "Admin access →")
-        : h(Fragment, null,
-            h('p', { style:{margin:"0 0 10px",fontSize:14,fontWeight:500} }, "Admin login"),
-            h(Field, { label:"Admin PIN" },
-              h('input', { type:"password", maxLength:8, value:adminPin_, onChange:e=>setAdminPin_(e.target.value),
-                onKeyDown:e=>e.key==="Enter"&&(adminPin_===adminPin?onAdmin():setErr("Wrong PIN.")), placeholder:"••••••" })
-            ),
-            err && adminMode && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-            h('div', { style:{display:"flex",gap:8} },
-              h('button', { className:"primary", onClick:()=>adminPin_===adminPin?onAdmin():setErr("Wrong PIN."), style:{flex:2} }, "Sign in"),
-              h('button', { onClick:()=>{setAdminMode(false);setErr("");}, style:{flex:1} }, "Cancel")
+      !adminMode && !setupMode
+        ? h('button', { className:"ghost", onClick:()=>{
+            if (needsAdminSetup) setSetupMode(true);
+            else setAdminMode(true);
+          }, style:{fontSize:13,padding:"4px 0"} }, "Admin access →")
+        : setupMode
+          ? h(Fragment, null,
+              h('p', { style:{margin:"0 0 12px",fontSize:14,fontWeight:500} }, "Set up admin PIN"),
+              h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 12px"} }, "No admin PIN has been configured. Create one to access the admin dashboard."),
+              setupStep===1 && h(Fragment, null,
+                h(Field, { label:"New PIN (min 4 digits)" },
+                  h('input', { type:"password", maxLength:8, value:setupPin1, onChange:e=>setSetupPin1(e.target.value), placeholder:"••••••", autoFocus:true })
+                ),
+                err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+                h('button', { className:"primary", onClick:()=>{
+                  if(setupPin1.length<4){setErr("Min 4 digits.");}
+                  else{setErr("");setSetupStep(2);}
+                }, style:{width:"100%"} }, "Next →")
+              ),
+              setupStep===2 && h(Fragment, null,
+                h(Field, { label:"Confirm PIN" },
+                  h('input', { type:"password", maxLength:8, value:setupPin2, onChange:e=>setSetupPin2(e.target.value),
+                    onKeyDown:e=>e.key==="Enter"&&!loading&&handleAdminSetup(), placeholder:"••••••" })
+                ),
+                err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+                h('div', { style:{display:"flex",gap:8} },
+                  h('button', { onClick:()=>{setSetupStep(1);setErr("");}, style:{flex:1} }, "← Back"),
+                  h('button', { className:"primary", onClick:handleAdminSetup, disabled:loading, style:{flex:2} },
+                    loading?"Saving…":"Create PIN & sign in")
+                )
+              ),
+              h('button', { className:"ghost", onClick:()=>{setSetupMode(false);setErr("");setSetupPin1("");setSetupPin2("");setSetupStep(1);},
+                style:{width:"100%",marginTop:8,fontSize:12} }, "Cancel")
             )
-          )
+          : h(Fragment, null,
+              h('p', { style:{margin:"0 0 10px",fontSize:14,fontWeight:500} }, "Admin login"),
+              h(Field, { label:"Admin PIN" },
+                h('input', { type:"password", maxLength:8, value:adminPin_, onChange:e=>setAdminPin_(e.target.value),
+                  onKeyDown:e=>e.key==="Enter"&&!loading&&handleAdminLogin(), placeholder:"••••••", autoFocus:true })
+              ),
+              err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+              h('div', { style:{display:"flex",gap:8} },
+                h('button', { className:"primary", onClick:handleAdminLogin, disabled:loading, style:{flex:2} },
+                  loading?"Signing in…":"Sign in"),
+                h('button', { onClick:()=>{setAdminMode(false);setErr("");setAdminPin_("");}, style:{flex:1} }, "Cancel")
+              )
+            )
     )
   );
 }
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
-function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
-  const [step, setStep] = useState(setupMode ? "s1" : "login");
+// Now calls the Edge Function server-side for PIN validation.
+// The server returns the employee record on success; no full staff array needed.
+function LoginScreen({name, hasPin, onSuccess, onBack}) {
+  const [step, setStep] = useState(hasPin ? "login" : "s1");
   const [p1, setP1] = useState("");
   const [p2, setP2] = useState("");
   const [err, setErr] = useState("");
-  const emp = staff.find(s=>s.name===name);
+  const [loading, setLoading] = useState(false);
+
+  async function login() {
+    if (!p1) { setErr("Enter your PIN."); return; }
+    setLoading(true); setErr("");
+    try {
+      const res = await callApi("employee_login", { name, pin: p1 });
+      if (res.setupRequired) { setStep("s1"); setLoading(false); return; }
+      onSuccess(res.emp, p1);
+    } catch(e) {
+      setErr("Wrong PIN. Try again.");
+    }
+    setLoading(false);
+  }
 
   async function setPin() {
     if (p1.length<4) { setErr("Min 4 digits."); return; }
     if (p1!==p2) { setErr("Don't match."); return; }
-    await persist(staff.map(e=>e.name===name?{...e,pin:hashPin(p1)}:e));
-    onSuccess();
-  }
-  function login() {
-    if (hashPin(p1)===emp?.pin) onSuccess();
-    else setErr("Wrong PIN.");
+    setLoading(true); setErr("");
+    try {
+      // For first-time PIN setup, login with the new PIN which triggers setup on server
+      const res = await callApi("employee_login", { name, pin: p1 });
+      // Server returns setupRequired:true since no PIN set yet — that's expected
+      // We then do a save to persist the new PIN
+      const saveRes = await callApi("employee_save", {
+        name, pin: p1,
+        updatedEmp: { ...res.emp, pin: hashPin(p1) }
+      });
+      onSuccess(saveRes.emp, p1);
+    } catch(e) {
+      setErr("Setup failed. Please try again.");
+    }
+    setLoading(false);
   }
 
-  const stepSub = setupMode?"First time — create a PIN":step.startsWith("s")&&step!=="login"?"Create your PIN":"Welcome back";
+  const stepSub = !hasPin ? "First time — create a PIN" : step.startsWith("s") ? "Create your PIN" : "Welcome back";
 
   return h('div', { style:{maxWidth:400,margin:"0 auto",padding:"2.5rem 1rem",minHeight:"100vh"} },
     h('button', { className:"ghost", onClick:onBack, style:{marginBottom:"1.5rem",fontSize:13} }, "← Back"),
@@ -887,28 +960,33 @@ function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
     h(Card, null,
       step==="login" && h(Fragment, null,
         h(Field, { label:"Your PIN" },
-          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), onKeyDown:e=>e.key==="Enter"&&login(), placeholder:"••••••" })
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value),
+            onKeyDown:e=>e.key==="Enter"&&!loading&&login(), placeholder:"••••••", autoFocus:true })
         ),
         err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-        h('button', { className:"primary", onClick:login, style:{width:"100%",padding:"12px",marginBottom:10} }, "Sign in"),
+        h('button', { className:"primary", onClick:login, disabled:loading, style:{width:"100%",padding:"12px",marginBottom:10} },
+          loading ? "Signing in…" : "Sign in"),
         h('p', { style:{fontSize:12,color:C.textDim,textAlign:"center",margin:0} }, "Forgot your PIN? Contact your admin to reset it.")
       ),
       step==="s1" && h(Fragment, null,
         h('p', { style:{fontSize:14,color:C.textMid,margin:"0 0 1rem"} }, "Choose a PIN (min 4 digits)."),
         h(Field, { label:"New PIN" },
-          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••" })
+          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••", autoFocus:true })
         ),
         err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-        h('button', { className:"primary", onClick:()=>{if(p1.length<4){setErr("Min 4 digits.");}else{setErr("");setStep("s2");}}, style:{width:"100%",padding:"12px"} }, "Next →")
+        h('button', { className:"primary", onClick:()=>{if(p1.length<4){setErr("Min 4 digits.");}else{setErr("");setStep("s2");}},
+          style:{width:"100%",padding:"12px"} }, "Next →")
       ),
       step==="s2" && h(Fragment, null,
         h(Field, { label:"Confirm PIN" },
-          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value), onKeyDown:e=>e.key==="Enter"&&setPin(), placeholder:"••••••" })
+          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value),
+            onKeyDown:e=>e.key==="Enter"&&!loading&&setPin(), placeholder:"••••••" })
         ),
         err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
         h('div', { style:{display:"flex",gap:8} },
           h('button', { onClick:()=>{setStep("s1");setErr("");}, style:{flex:1} }, "← Back"),
-          h('button', { className:"primary", onClick:setPin, style:{flex:2} }, "Set PIN & sign in")
+          h('button', { className:"primary", onClick:setPin, disabled:loading, style:{flex:2} },
+            loading ? "Saving…" : "Set PIN & sign in")
         )
       )
     )
@@ -916,7 +994,8 @@ function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
 }
 
 // ─── Employee Screen ──────────────────────────────────────────────────────────
-function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+  const [emp, setEmp] = useState(initialEmp);
   const [tab, setTab] = useState("balance");
   const [msg, setMsg] = useState("");
   const [showChangePin, setShowChangePin] = useState(false);
@@ -931,19 +1010,25 @@ function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcS
   const hireYrs=((new Date()-new Date(emp.hireDate))/(1000*60*60*24*365.25)).toFixed(1);
 
   function flash(m) { setMsg(m); setTimeout(()=>setMsg(""),5000); }
+
+  async function persistEmp(updatedEmp) {
+    const res = await callApi("employee_save", { name:emp.name, pin:sessionPin, updatedEmp });
+    setEmp(res.emp);
+  }
+
   async function saveEntry(data, editId) {
     let entries=[...(emp.entries||[])];
     if (editId) entries=entries.map(e=>e.id===editId?{...e,...data}:e);
     else entries=[...entries,{...data,id:Date.now()}];
-    await persist(staff.map(s=>s.name===emp.name?{...s,entries}:s));
+    await persistEmp({...emp, entries});
     flash("Entry saved!");
   }
   async function delEntry(id) {
-    await persist(staff.map(s=>s.name===emp.name?{...s,entries:(s.entries||[]).filter(e=>e.id!==id)}:s));
+    await persistEmp({...emp, entries:(emp.entries||[]).filter(e=>e.id!==id)});
     flash("Entry removed.");
   }
   async function saveNewPin(newPin) {
-    await persist(staff.map(s=>s.name===emp.name?{...s,pin:hashPin(newPin)}:s));
+    await persistEmp({...emp, pin:hashPin(newPin)});
     setShowChangePin(false);
     flash("PIN updated successfully!");
   }
@@ -1010,7 +1095,8 @@ function EmployeeScreen({emp, staff, persist, calcBalance, calcEOYBalance, calcS
 }
 
 // ─── Admin Screen ─────────────────────────────────────────────────────────────
-function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+function AdminScreen({staff: initialStaff, sessionPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut}) {
+  const [staff, setStaff] = useState(initialStaff);
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
@@ -1023,6 +1109,14 @@ function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, cal
   const [adjEmp, setAdjEmp] = useState(null);
 
   function flash(m) { setMsg(m); setTimeout(()=>setMsg(""),4000); }
+
+  async function adminSave(newStaff, newAdminPin) {
+    const payload = { pin: sessionPin, staff: newStaff };
+    if (newAdminPin) payload.newAdminPin = newAdminPin;
+    await callApi("admin_save", payload);
+    setStaff(newStaff);
+  }
+
   function startEdit(emp) {
     setEditing(emp.name);
     setForm({ name:emp.name, hireDate:emp.hireDate, weeklyHours:emp.weeklyHours,
@@ -1033,29 +1127,30 @@ function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, cal
       weeklyHours:parseFloat(form.weeklyHours)||40, rolloverHours:parseFloat(form.rolloverHours)||0,
       ptoOverride:form.ptoOverride?parseFloat(form.ptoOverride):null };
     if (form.newPin && form.newPin.length>=4) updates.pin = hashPin(form.newPin);
-    await persist(staff.map(e=>e.name===editing?{...e,...updates}:e));
+    await adminSave(staff.map(e=>e.name===editing?{...e,...updates}:e));
     setEditing(null); flash("Saved.");
   }
   async function addEmployee() {
     if (!newName.trim()) return;
-    await persist([...staff,{name:newName.trim(),pin:null,hireDate:new Date().toISOString().split("T")[0],weeklyHours:40,ptoOverride:null,rolloverHours:0,entries:[]}]);
+    await adminSave([...staff,{name:newName.trim(),pin:null,hireDate:new Date().toISOString().split("T")[0],weeklyHours:40,ptoOverride:null,rolloverHours:0,entries:[]}]);
     setNewName(""); flash("Employee added.");
   }
   async function resetPin(name) {
-    await persist(staff.map(e=>e.name===name?{...e,pin:null}:e));
+    await adminSave(staff.map(e=>e.name===name?{...e,pin:null}:e));
     flash(`PIN reset for ${name}.`);
   }
   async function changeAdminPin() {
     if (np.length<4) { setPinErr("Min 4 digits."); return; }
     if (np!==cp) { setPinErr("Don't match."); return; }
-    await persist(staff, np); setPinPanel(false); setNp(""); setCp(""); flash("Admin PIN updated.");
+    await adminSave(staff, np);
+    setPinPanel(false); setNp(""); setCp(""); flash("Admin PIN updated.");
   }
   async function saveAdminEntry(empName, data) {
-    await persist(staff.map(s=>s.name===empName?{...s,entries:[...(s.entries||[]),{...data,id:Date.now(),addedBy:"admin"}]}:s));
+    await adminSave(staff.map(s=>s.name===empName?{...s,entries:[...(s.entries||[]),{...data,id:Date.now(),addedBy:"admin"}]}:s));
     setAdjEmp(null); flash(`Entry added for ${empName}`);
   }
   async function deleteEmpEntry(empName, id) {
-    await persist(staff.map(s=>s.name===empName?{...s,entries:(s.entries||[]).filter(e=>e.id!==id)}:s));
+    await adminSave(staff.map(s=>s.name===empName?{...s,entries:(s.entries||[]).filter(e=>e.id!==id)}:s));
     flash("Entry removed.");
   }
 
@@ -1242,33 +1337,34 @@ function AdminScreen({staff, persist, adminPin, calcBalance, calcEOYBalance, cal
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 function App() {
+  // Bootstrap state: only staff names + hasPin flags, no sensitive data
   const [ready, setReady] = useState(false);
-  const [staff, setStaff] = useState([]);
-  const [adminPin, setAdminPin] = useState(DEFAULT_ADMIN_PIN);
+  const [loadError, setLoadError] = useState("");
+  const [staffNames, setStaffNames] = useState([]); // [{name, hasPin}]
+  const [needsAdminSetup, setNeedsAdminSetup] = useState(false);
+
+  // Session state: populated only after successful login
   const [view, setView] = useState("home");
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentEmp, setCurrentEmp] = useState(null);     // full emp record from server
+  const [sessionPin, setSessionPin] = useState(null);      // held in memory, never persisted
+  const [adminStaff, setAdminStaff] = useState(null);      // full staff array, admin only
+  const [adminSessionPin, setAdminSessionPin] = useState(null);
   const [selectedName, setSelectedName] = useState("");
-  const [setupMode, setSetupMode] = useState(false);
+  const [selectedHasPin, setSelectedHasPin] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const d = await dbGet();
-        if (d && d.staff) {
-          setStaff(d.staff||[]);
-          setAdminPin(d.adminPin||DEFAULT_ADMIN_PIN);
-        }
-      } catch(e) { console.error("Load error:", e); }
+        const res = await callApi("bootstrap");
+        setStaffNames(res.staffNames || []);
+        setNeedsAdminSetup(res.needsAdminSetup || false);
+      } catch(e) {
+        setLoadError("Unable to connect. Please refresh the page.");
+        console.error("Bootstrap error:", e);
+      }
       setReady(true);
     })();
   }, []);
-
-  const persist = useCallback(async (ns, np) => {
-    const ap = np ?? adminPin;
-    await dbSet({ staff:ns, adminPin:ap });
-    setStaff(ns);
-    if (np) setAdminPin(np);
-  }, [adminPin]);
 
   const calcBalance = emp => {
     if (!emp) return 0;
@@ -1296,17 +1392,61 @@ function App() {
     return (emp.entries||[]).filter(e=>new Date(e.date+"T12:00:00")>now&&e.type==="scheduled").reduce((a,e)=>a+e.hours,0);
   };
 
-  const emp = staff.find(s=>s.name===currentUser);
+  function signOut() {
+    setCurrentEmp(null); setSessionPin(null);
+    setAdminStaff(null); setAdminSessionPin(null);
+    setView("home");
+  }
 
   if (!ready) return h('div', { style:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"} },
     h('p', { style:{color:C.textMid,fontSize:16} }, "Loading…")
   );
 
+  if (loadError) return h('div', { style:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:"2rem"} },
+    h('div', { style:{textAlign:"center"} },
+      h('p', { style:{color:C.red,fontSize:16,marginBottom:12} }, loadError),
+      h('button', { onClick:()=>window.location.reload() }, "Retry")
+    )
+  );
+
   return h(Fragment, null,
-    view==="home" && h(HomeScreen, { staff, adminPin, onEmployee:(n,s)=>{setSelectedName(n);setSetupMode(s);setView("login");}, onAdmin:()=>setView("admin") }),
-    view==="login" && h(LoginScreen, { name:selectedName, staff, setupMode, persist, onSuccess:()=>{setCurrentUser(selectedName);setView("employee");}, onBack:()=>setView("home") }),
-    view==="employee" && emp && h(EmployeeScreen, { emp, staff, persist, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut:()=>{setCurrentUser(null);setView("home");} }),
-    view==="admin" && h(AdminScreen, { staff, persist, adminPin, calcBalance, calcEOYBalance, calcScheduled, calcNextRollover, onSignOut:()=>setView("home") })
+    view==="home" && h(HomeScreen, {
+      staffNames, needsAdminSetup,
+      onEmployee:(name, hasPin) => { setSelectedName(name); setSelectedHasPin(hasPin); setView("login"); },
+      onAdmin: async (pin) => {
+        try {
+          const res = await callApi("admin_login", { pin });
+          setAdminStaff(res.staff);
+          setAdminSessionPin(pin);
+          setView("admin");
+        } catch(e) { return e.message || "Wrong PIN."; }
+      },
+      onAdminSetup: async (pin) => {
+        try {
+          await callApi("admin_setup", { newPin: pin });
+          setNeedsAdminSetup(false);
+          const res = await callApi("admin_login", { pin });
+          setAdminStaff(res.staff);
+          setAdminSessionPin(pin);
+          setView("admin");
+        } catch(e) { return e.message || "Setup failed."; }
+      }
+    }),
+    view==="login" && h(LoginScreen, {
+      name: selectedName, hasPin: selectedHasPin,
+      onSuccess: (emp, pin) => { setCurrentEmp(emp); setSessionPin(pin); setView("employee"); },
+      onBack: () => setView("home")
+    }),
+    view==="employee" && currentEmp && h(EmployeeScreen, {
+      emp: currentEmp, sessionPin,
+      calcBalance, calcEOYBalance, calcScheduled, calcNextRollover,
+      onSignOut: signOut
+    }),
+    view==="admin" && adminStaff && h(AdminScreen, {
+      staff: adminStaff, sessionPin: adminSessionPin,
+      calcBalance, calcEOYBalance, calcScheduled, calcNextRollover,
+      onSignOut: signOut
+    })
   );
 }
 
