@@ -860,7 +860,6 @@ function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
   const [p1, setP1] = useState("");
   const [p2, setP2] = useState("");
   const [err, setErr] = useState("");
-  const [resetDate, setResetDate] = useState("");
   const emp = staff.find(s=>s.name===name);
 
   async function setPin() {
@@ -873,12 +872,8 @@ function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
     if (hashPin(p1)===emp?.pin) onSuccess();
     else setErr("Wrong PIN.");
   }
-  function verifyHireDate() {
-    if (resetDate===emp?.hireDate) { setStep("reset1"); setErr(""); }
-    else setErr("Hire date doesn't match. Please contact your admin.");
-  }
 
-  const stepSub = setupMode?"First time — create a PIN":step==="forgot"?"Verify your identity":step.startsWith("reset")?"Reset your PIN":"Welcome back";
+  const stepSub = setupMode?"First time — create a PIN":step.startsWith("s")&&step!=="login"?"Create your PIN":"Welcome back";
 
   return h('div', { style:{maxWidth:400,margin:"0 auto",padding:"2.5rem 1rem",minHeight:"100vh"} },
     h('button', { className:"ghost", onClick:onBack, style:{marginBottom:"1.5rem",fontSize:13} }, "← Back"),
@@ -896,36 +891,7 @@ function LoginScreen({name, staff, setupMode, persist, onSuccess, onBack}) {
         ),
         err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
         h('button', { className:"primary", onClick:login, style:{width:"100%",padding:"12px",marginBottom:10} }, "Sign in"),
-        h('button', { className:"ghost", onClick:()=>{setStep("forgot");setErr("");setP1("");}, style:{width:"100%",fontSize:13} }, "Forgot my PIN")
-      ),
-      step==="forgot" && h(Fragment, null,
-        h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Enter your hire date to verify your identity."),
-        h(Field, { label:"Your hire date" },
-          h('input', { type:"date", value:resetDate, onChange:e=>setResetDate(e.target.value) })
-        ),
-        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-        h('div', { style:{display:"flex",gap:8} },
-          h('button', { className:"primary", onClick:verifyHireDate, style:{flex:2} }, "Verify"),
-          h('button', { onClick:()=>{setStep("login");setErr("");setResetDate("");}, style:{flex:1} }, "Cancel")
-        )
-      ),
-      step==="reset1" && h(Fragment, null,
-        h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Identity verified! Choose a new PIN."),
-        h(Field, { label:"New PIN (min 4 digits)" },
-          h('input', { type:"password", maxLength:8, value:p1, onChange:e=>setP1(e.target.value), placeholder:"••••••" })
-        ),
-        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-        h('button', { className:"primary", onClick:()=>{if(p1.length<4){setErr("Min 4 digits.");}else{setErr("");setStep("reset2");}}, style:{width:"100%",padding:"12px"} }, "Next →")
-      ),
-      step==="reset2" && h(Fragment, null,
-        h(Field, { label:"Confirm new PIN" },
-          h('input', { type:"password", maxLength:8, value:p2, onChange:e=>setP2(e.target.value), onKeyDown:e=>e.key==="Enter"&&setPin(), placeholder:"••••••" })
-        ),
-        err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
-        h('div', { style:{display:"flex",gap:8} },
-          h('button', { onClick:()=>{setStep("reset1");setErr("");}, style:{flex:1} }, "← Back"),
-          h('button', { className:"primary", onClick:setPin, style:{flex:2} }, "Set PIN & sign in")
-        )
+        h('p', { style:{fontSize:12,color:C.textDim,textAlign:"center",margin:0} }, "Forgot your PIN? Contact your admin to reset it.")
       ),
       step==="s1" && h(Fragment, null,
         h('p', { style:{fontSize:14,color:C.textMid,margin:"0 0 1rem"} }, "Choose a PIN (min 4 digits)."),
