@@ -26,9 +26,6 @@ The app is a single HTML file with no build step. It runs entirely in the browse
 
 | Setting | Value |
 |---|---|
-| Supabase project | `ykddpajaqftrcmmhizoq.supabase.co` |
-| Supabase table | `pto_data` |
-| Default admin PIN | `1234` — change this on first login via Admin → Settings |
 | PTO year | January 2 – January 1 |
 | Rollover cap | 40 hours |
 
@@ -51,7 +48,3 @@ Part-time employees accrue proportionally based on their weekly hours. Individua
 In the live app, go to **Admin → Staff → Add employee**. Enter their full name, then use the Edit button to set their hire date, weekly hours, rollover balance, and PIN. No code changes required.
 
 ---
-
-## Architecture
-
-See [`CxA_PTO_Tracker_Architecture.md`](CxA_PTO_Tracker_Architecture.md) for full technical documentation.
