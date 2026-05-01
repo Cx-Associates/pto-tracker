@@ -267,33 +267,29 @@ function Donut({value, max, label, sub, color=C.accent, size=150}) {
 }
 
 // ─── Timeline bar ─────────────────────────────────────────────────────────────
-function Timeline({accrued, eoy, taken, scheduled, rollover}) {
-  const max = Math.max(eoy + (rollover||0), 10), ro = rollover||0;
-  const rem = Math.max(0, eoy - accrued), np = yearProgress();
-  const segs = [
-    {v:ro,        c:"#14b8a6", l:"Rollover"},
-    {v:accrued,   c:C.accent,  l:"Accrued"},
-    {v:rem,       c:C.accentDim,l:"Remaining"},
-    {v:taken,     c:C.amber,   l:"Taken"},
-    {v:scheduled, c:"#78350f", l:"Scheduled"}
+function Timeline({accrued, eoy, taken, scheduled, rollover, annualAllotment}) {
+  const ro = rollover||0;
+  const cards = [
+    { label:"Accrued YTD", value:r2(accrued), unit:"hrs", sub:`of ${annualAllotment} hrs allotted`, color:"#6366f1", emoji:"📈" },
+    { label:"Rollover",    value:r2(ro),       unit:"hrs", sub:"from last year",   color:"#14b8a6", emoji:"🔄" },
+    { label:"Taken YTD",   value:r2(taken),    unit:"hrs", sub:"this PTO year",    color:"#f59e0b", emoji:"🌴" },
+    { label:"Scheduled",   value:r2(scheduled),unit:"hrs", sub:"upcoming",         color:"#6366f1", emoji:"📅" },
+    { label:"Est. year-end",value:r2(eoy),     unit:"hrs", sub:"if no more taken", color:"#10b981", emoji:"🎯" }
   ];
-  return h('div', null,
-    h('div', { style:{position:"relative",height:18,background:C.card2,borderRadius:9,overflow:"hidden",display:"flex"} },
-      segs.map((s,i) => h('div', { key:i, style:{width:`${Math.max(0,(s.v/max)*100)}%`,background:s.c,height:"100%"} }))
-    ),
-    h('div', { style:{position:"relative",marginTop:-22,pointerEvents:"none"} },
-      h('div', { style:{position:"absolute",left:`${np*100}%`,transform:"translateX(-50%)",width:2,height:28,background:C.text,borderRadius:1,opacity:.9} })
-    ),
-    h('div', { style:{marginTop:28,display:"flex",flexWrap:"wrap",gap:"6px 14px"} },
-      segs.map(s => h('div', { key:s.l, style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
-        h('div', { style:{width:9,height:9,borderRadius:2,background:s.c} }),
-        s.l
-      )),
-      h('div', { style:{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.textMid} },
-        h('div', { style:{width:2,height:12,background:C.text,borderRadius:1} }),
-        " Today"
-      )
-    )
+  return h('div', { style:{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10} },
+    cards.map(card => h('div', { key:card.label,
+      style:{ background:C.card2, border:`0.5px solid ${C.border}`, borderLeft:`3px solid ${card.color}`,
+        borderRadius:12, padding:"0.75rem 1rem", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+      h('div', null,
+        h('div', { style:{fontSize:11,color:C.textMid,marginBottom:4} }, card.label),
+        h('div', { style:{fontSize:22,fontWeight:600,color:C.text,lineHeight:1} },
+          card.value,
+          h('span', { style:{fontSize:12,fontWeight:400,color:C.textMid,marginLeft:2} }, card.unit)
+        ),
+        h('div', { style:{fontSize:10,color:C.textDim,marginTop:3} }, card.sub)
+      ),
+      h('div', { style:{fontSize:20,opacity:.5,flexShrink:0} }, card.emoji)
+    ))
   );
 }
 
@@ -1060,8 +1056,8 @@ function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalanc
         )
       ),
       h(Card, { style:{marginBottom:"1rem"} },
-        h('p', { style:{margin:"0 0 1rem",fontSize:11,fontWeight:600,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.07em"} }, "PTO year at a glance (Jan 2 – Jan 1)"),
-        h(Timeline, { accrued, eoy:eoyAcc, taken, scheduled, rollover:emp.rolloverHours||0 })
+        h('p', { style:{margin:"0 0 0.75rem",fontSize:11,fontWeight:600,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.07em"} }, "PTO year at a glance · Jan 2 – Jan 1"),
+        h(Timeline, { accrued, eoy:eoyAcc, taken, scheduled, rollover:emp.rolloverHours||0, annualAllotment })
       ),
       h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8} },
         statCards.map(({label,value,color}) =>
