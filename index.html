@@ -1032,10 +1032,6 @@ function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalanc
   const statCards = [
     {label:"Annual PTO Allotment",   value:`${annualAllotment} hrs/yr`,   color:C.accentText},
     {label:"Weekly Accrual Rate",    value:`${fmt(wklyRate)} hrs/wk`,      color:C.text},
-    {label:"Rollover (from last yr)",value:`${fmt(emp.rolloverHours||0)} hrs`, color:C.text},
-    {label:"Accrued YTD",            value:`${fmt(accrued)} hrs`,           color:C.text},
-    {label:"Taken YTD",              value:`${fmt(taken)} hrs`,             color:C.amberText},
-    {label:"Upcoming Scheduled",     value:`${fmt(scheduled)} hrs`,         color:C.greenText},
     {label:"Est. Rollover Next Year",value:`${fmt(nextRollover)} hrs`,      color:nextRollover>=ROLLOVER_CAP?C.amber:C.textMid}
   ];
 
