@@ -147,13 +147,21 @@ function lastName(name) { const p = name.trim().split(" "); return p[p.length-1]
 
 function calcTakenYTD(emp) {
   const now = new Date(), pty = currentPTOYear();
-  // Include both "taken" entries and past "scheduled" entries (which display as "taken" once their date has passed)
+  // Include taken entries and past scheduled entries
   const taken = (emp.entries||[]).filter(e =>
     (e.type==="taken" || e.type==="scheduled") &&
     getPTOYear(e.date)===pty &&
     new Date(e.date+"T12:00:00")<=now
   ).reduce((a,e)=>a+e.hours,0);
-  return r2(taken);
+  // Include user adjustments (not admin): stored as negated, so negative stored = positive user entry = more time taken
+  const adjTaken = (emp.entries||[]).filter(e =>
+    e.type==="adjustment" &&
+    !e.addedBy &&
+    getPTOYear(e.date)===pty &&
+    new Date(e.date+"T12:00:00")<=now &&
+    e.hours<0  // stored negative = user entered positive = took more time
+  ).reduce((a,e)=>a+Math.abs(e.hours),0);
+  return r2(taken + adjTaken);
 }
 
 // ─── Primitive UI helpers ─────────────────────────────────────────────────────
