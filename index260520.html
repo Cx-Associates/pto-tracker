@@ -620,9 +620,9 @@ function HistoryView({emp, balance, onSave, onDelete}) {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
 
-  // An entry is "past" if it's a taken entry dated on or before today
+  // An entry is "past" if it's a taken or scheduled entry dated on or before today
   function isPastTaken(e) {
-    return e.type==="taken" && new Date(e.date+"T12:00:00") <= now;
+    return (e.type==="taken" || e.type==="scheduled") && new Date(e.date+"T12:00:00") <= now;
   }
   // An entry is "future" if it's scheduled or taken and dated after today
   function isFuture(e) {
