@@ -504,7 +504,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
       ),
     type==="taken" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "How many hours did you take?"),
     type==="scheduled" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "How many hours would you like to schedule?"),
-    type==="adjustment" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "Enter the date you want to adjust. If you took less time than scheduled, enter a positive value to add hours back. If you took more time than scheduled, enter a negative value to deduct hours."),
+    type==="adjustment" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "Enter the date you want to adjust. If you took more time than scheduled, enter a positive value. If you took less time than scheduled, enter a negative value."),
     h(Field, { label:"Hours", hint:useRange&&type!=="adjustment"?"Auto-calculated — adjust if needed":"" },
       h('input', { type:"number", step:"0.01", value:hours, onChange:e=>setHours(e.target.value),
         placeholder:"e.g. 4.00" })
