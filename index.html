@@ -148,8 +148,7 @@ function lastName(name) { const p = name.trim().split(" "); return p[p.length-1]
 function calcTakenYTD(emp) {
   const now = new Date(), pty = currentPTOYear();
   const taken = (emp.entries||[]).filter(e => e.type==="taken" && getPTOYear(e.date)===pty && new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0);
-  const negAdj = (emp.entries||[]).filter(e => e.type==="adjustment" && getPTOYear(e.date)===pty && e.hours<0).reduce((a,e)=>a+Math.abs(e.hours),0);
-  return r2(taken + negAdj);
+  return r2(taken);
 }
 
 // ─── Primitive UI helpers ─────────────────────────────────────────────────────
@@ -267,14 +266,13 @@ function Donut({value, max, label, sub, color=C.accent, size=150}) {
 }
 
 // ─── Timeline bar ─────────────────────────────────────────────────────────────
-function Timeline({accrued, eoy, taken, scheduled, rollover, annualAllotment}) {
+function Timeline({accrued, taken, scheduled, rollover, annualAllotment}) {
   const ro = rollover||0;
   const cards = [
     { label:"Accrued YTD", value:r2(accrued), unit:"hrs", sub:`of ${annualAllotment} hrs allotted`, color:"#6366f1", emoji:"📈" },
     { label:"Rollover",    value:r2(ro),       unit:"hrs", sub:"from last year",   color:"#14b8a6", emoji:"🔄" },
     { label:"Taken YTD",   value:r2(taken),    unit:"hrs", sub:"this PTO year",    color:"#f59e0b", emoji:"🌴" },
-    { label:"Scheduled",   value:r2(scheduled),unit:"hrs", sub:"upcoming",         color:"#6366f1", emoji:"📅" },
-    { label:"Est. year-end",value:r2(eoy),     unit:"hrs", sub:"if no more taken", color:"#10b981", emoji:"🎯" }
+    { label:"Scheduled",   value:r2(scheduled),unit:"hrs", sub:"upcoming",         color:"#6366f1", emoji:"📅" }
   ];
   return h('div', { style:{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10} },
     cards.map(card => h('div', { key:card.label,
@@ -1037,7 +1035,6 @@ function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalanc
   const balance=calcBalance(emp), eoy=calcEOYBalance(emp), scheduled=calcScheduled(emp);
   const pty=currentPTOYear();
   const accrued=calcAccruedInYear(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
-  const eoyAcc=calcAccruedEOY(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null);
   const taken=calcTakenYTD(emp), nextRollover=calcNextRollover(emp);
   const annualAllotment=annualAllotmentDisplay(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null);
   const wklyRate=weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null);
@@ -1091,7 +1088,7 @@ function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalanc
       ),
       h(Card, { style:{marginBottom:"1rem"} },
         h('p', { style:{margin:"0 0 0.75rem",fontSize:11,fontWeight:600,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.07em"} }, "PTO year at a glance · Jan 2 – Jan 1"),
-        h(Timeline, { accrued, eoy:eoyAcc, taken, scheduled, rollover:emp.rolloverHours||0, annualAllotment })
+        h(Timeline, { accrued, taken, scheduled, rollover:emp.rolloverHours||0, annualAllotment })
       ),
       h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8} },
         statCards.map(({label,value,color}) =>
