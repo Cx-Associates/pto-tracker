@@ -147,7 +147,12 @@ function lastName(name) { const p = name.trim().split(" "); return p[p.length-1]
 
 function calcTakenYTD(emp) {
   const now = new Date(), pty = currentPTOYear();
-  const taken = (emp.entries||[]).filter(e => e.type==="taken" && getPTOYear(e.date)===pty && new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0);
+  // Include both "taken" entries and past "scheduled" entries (which display as "taken" once their date has passed)
+  const taken = (emp.entries||[]).filter(e =>
+    (e.type==="taken" || e.type==="scheduled") &&
+    getPTOYear(e.date)===pty &&
+    new Date(e.date+"T12:00:00")<=now
+  ).reduce((a,e)=>a+e.hours,0);
   return r2(taken);
 }
 
