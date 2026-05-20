@@ -480,7 +480,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     ),
     h('div', { style:{display:"grid",gridTemplateColumns:useRange&&type!=="adjustment"?"1fr 1fr":"1fr",gap:10} },
       h(Field, { label:useRange&&type!=="adjustment"?"Start date":"Date" },
-        h('input', { type:"date", value:date, onChange:e=>setDate(e.target.value) })
+        h('input', { type:"date", value:date, max:type==="taken"?now:undefined, onChange:e=>setDate(e.target.value) })
       ),
       useRange && type!=="adjustment" && h(Field, { label:"End date", hint:"Weekdays only" },
         h('input', { type:"date", value:endDate, min:date, onChange:e=>setEndDate(e.target.value) })
@@ -617,6 +617,17 @@ function HistoryView({emp, balance, onSave, onDelete}) {
   const [showAccruals, setShowAccruals] = useState(false);
   const [showAllAccruals, setShowAllAccruals] = useState(false);
   const pty = currentPTOYear();
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+
+  // An entry is "past" if it's a taken or scheduled entry dated on or before today
+  function isPastTaken(e) {
+    return (e.type==="taken" || e.type==="scheduled") && new Date(e.date+"T12:00:00") <= now;
+  }
+  // An entry is "future" if it's scheduled or taken and dated after today
+  function isFuture(e) {
+    return (e.type==="scheduled" || e.type==="taken") && new Date(e.date+"T12:00:00") > now;
+  }
 
   const accrualEvents = useMemo(() => {
     if (!showAccruals) return [];
@@ -633,6 +644,9 @@ function HistoryView({emp, balance, onSave, onDelete}) {
 
   const allEntries = [...(emp.entries||[]).map(e=>({...e,entryDate:e.entryDate||e.date})), ...accrualEvents];
   const sorted = [...allEntries].sort((a,b)=>new Date((sortBy==="ptoDate"?b.date:b.entryDate)+"T12:00:00")-new Date((sortBy==="ptoDate"?a.date:a.entryDate)+"T12:00:00"));
+
+  // Find index where we cross from future to past (for Today divider)
+  let todayDividerInserted = false;
 
   return h(Card, null,
     h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8} },
@@ -660,36 +674,60 @@ function HistoryView({emp, balance, onSave, onDelete}) {
       )
     ),
     sorted.length===0 && h('p', { style:{color:C.textDim,fontSize:13,textAlign:"center",padding:"1.5rem 0"} }, "No entries yet."),
-    sorted.map(e =>
-      h('div', { key:e.id, style:{padding:"10px 0",borderBottom:`1px solid ${C.border}`} },
-        !e.isAccrual && editEntry?.id===e.id
-          ? h(EntryForm, { initial:e, balance, weeklyHours:emp.weeklyHours,
-              onSave:d=>{onSave(d,e.id);setEditEntry(null);},
-              onCancel:()=>setEditEntry(null) })
-          : h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center"} },
-              h('div', null,
-                h('div', { style:{fontSize:14,fontWeight:500,color:e.isAccrual?C.textMid:C.text} },
-                  e.isRange?`${e.date} → ${e.endDate}`:e.date, " — ",
-                  h('span', { style:{color:e.isAccrual?C.greenText:e.type==="adjustment"?(e.hours<0?C.red:C.green):e.type==="taken"?C.amberText:C.greenText} },
-                    `${e.hours>=0&&e.type==="adjustment"?"+":""}${fmt(e.hours)}h`)
+    sorted.map((e, idx) => {
+      // Determine if we need to insert the Today divider before this entry
+      const entryDate = new Date((sortBy==="ptoDate"?e.date:e.entryDate)+"T12:00:00");
+      const needsDivider = !todayDividerInserted && entryDate <= now;
+      if (needsDivider) todayDividerInserted = true;
+
+      const past = isPastTaken(e);
+      const future = isFuture(e);
+      const borderColor = future ? C.green : past ? C.border : C.border;
+
+      return h(Fragment, { key:e.id },
+        // Today divider
+        needsDivider && h('div', { style:{display:"flex",alignItems:"center",gap:10,margin:"8px 0"} },
+          h('div', { style:{flex:1,height:1,background:C.border} }),
+          h('span', { style:{fontSize:11,fontWeight:600,color:C.textMid,whiteSpace:"nowrap",padding:"0 6px"} }, "▼ Today"),
+          h('div', { style:{flex:1,height:1,background:C.border} })
+        ),
+        h('div', { style:{padding:"10px 0 10px 10px",borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${borderColor}`,marginLeft:-2,paddingLeft:10} },
+          !e.isAccrual && editEntry?.id===e.id
+            ? h(EntryForm, { initial:e, balance, weeklyHours:emp.weeklyHours,
+                onSave:d=>{onSave(d,e.id);setEditEntry(null);},
+                onCancel:()=>setEditEntry(null) })
+            : h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center"} },
+                h('div', null,
+                  h('div', { style:{fontSize:14,fontWeight:500,color:e.isAccrual?C.textMid:C.text} },
+                    e.isRange?`${e.date} → ${e.endDate}`:e.date, " — ",
+                    h('span', { style:{color:e.isAccrual?C.greenText:e.type==="adjustment"?(e.hours<0?C.red:C.green):e.type==="taken"?C.amberText:C.greenText} },
+                      `${e.hours>=0&&e.type==="adjustment"?"+":""}${fmt(e.hours)}h`)
+                  ),
+                  e.note && h('div', { style:{fontSize:12,color:C.textMid,marginTop:2} }, e.note),
+                  e.addedBy==="admin" && h('div', { style:{fontSize:11,color:C.accentText,marginTop:2} }, "Added by admin"),
+                  h('div', { style:{fontSize:11,color:C.textDim,marginTop:2} }, `PTO year ${getPTOYear(e.date)}`)
                 ),
-                e.note && h('div', { style:{fontSize:12,color:C.textMid,marginTop:2} }, e.note),
-                e.addedBy==="admin" && h('div', { style:{fontSize:11,color:C.accentText,marginTop:2} }, "Added by admin"),
-                h('div', { style:{fontSize:11,color:C.textDim,marginTop:2} }, `PTO year ${getPTOYear(e.date)}`)
-              ),
-              h('div', { style:{display:"flex",gap:6,alignItems:"center"} },
-                h('span', { style:{fontSize:11,padding:"3px 8px",borderRadius:6,fontWeight:600,
-                  background:e.isAccrual?`${C.green}22`:e.type==="taken"?`${C.amberDim}88`:e.type==="scheduled"?C.greenDim:`${C.accent}33`,
-                  color:e.isAccrual?C.greenText:e.type==="taken"?C.amberText:e.type==="scheduled"?C.greenText:C.accentText} },
-                  e.isAccrual?"accrual":e.type),
-                !e.isAccrual && h(Fragment, null,
-                  h('button', { className:"ghost", onClick:()=>setEditEntry(e), style:{fontSize:11,padding:"3px 8px"} }, "edit"),
-                  h('button', { className:"danger", onClick:()=>onDelete(e.id), style:{fontSize:11,padding:"3px 8px"} }, "×")
+                h('div', { style:{display:"flex",gap:6,alignItems:"center"} },
+                  h('span', { style:{fontSize:11,padding:"3px 8px",borderRadius:6,fontWeight:600,
+                    background:e.isAccrual?`${C.green}22`:(e.type==="taken"||(e.type==="scheduled"&&past))?`${C.amberDim}88`:e.type==="scheduled"?C.greenDim:`${C.accent}33`,
+                    color:e.isAccrual?C.greenText:(e.type==="taken"||(e.type==="scheduled"&&past))?C.amberText:e.type==="scheduled"?C.greenText:C.accentText} },
+                    e.isAccrual?"accrual":(e.type==="scheduled"&&past)?"taken":e.type),
+                  !e.isAccrual && h(Fragment, null,
+                    // Edit button: disabled with tooltip for past taken entries
+                    past
+                      ? h('div', { style:{position:"relative",display:"inline-block"} },
+                          h('button', { className:"ghost", disabled:true,
+                            style:{fontSize:11,padding:"3px 8px",opacity:.35,cursor:"not-allowed"},
+                            title:"To modify past PTO, use ± Adjust when logging" }, "edit")
+                        )
+                      : h('button', { className:"ghost", onClick:()=>setEditEntry(e), style:{fontSize:11,padding:"3px 8px"} }, "edit"),
+                    h('button', { className:"danger", onClick:()=>onDelete(e.id), style:{fontSize:11,padding:"3px 8px"} }, "×")
+                  )
                 )
               )
-            )
-      )
-    )
+        )
+      );
+    })
   );
 }
 
