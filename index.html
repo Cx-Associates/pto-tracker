@@ -493,9 +493,12 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
       h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:8,padding:"8px 12px",marginBottom:10} },
         h('p', { style:{margin:0,fontSize:12,color:C.amberText} }, "⚠ Current balance is negative. You can still schedule future PTO.")
       ),
-    h(Field, { label:"Hours", hint:type==="adjustment"?"Negative to deduct, positive to add":useRange?"Auto-calculated — adjust if needed":"" },
+    type==="taken" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "How many hours did you take?"),
+    type==="scheduled" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "How many hours would you like to schedule?"),
+    type==="adjustment" && h('p', { style:{fontSize:13,color:C.textMid,margin:"-6px 0 10px"} }, "Enter the date you want to adjust. If you took more time than scheduled, enter a positive value. If you took less time than scheduled, enter a negative value."),
+    h(Field, { label:"Hours", hint:useRange&&type!=="adjustment"?"Auto-calculated — adjust if needed":"" },
       h('input', { type:"number", step:"0.01", value:hours, onChange:e=>setHours(e.target.value),
-        placeholder:type==="adjustment"?"-4.00 or +8.00":"e.g. 8.00" })
+        placeholder:"e.g. 4.00" })
     ),
     h(Field, { label:"Note (optional)" },
       h('input', { value:note, onChange:e=>setNote(e.target.value), placeholder:"e.g. vacation" })
@@ -825,6 +828,111 @@ function ReportView({staff, calcBalance, calcEOYBalance, calcScheduled, calcNext
           ))
         )
       )
+    )
+  );
+}
+
+
+// ─── Admin Entry Form ─────────────────────────────────────────────────────────
+function AdminEntryForm({balance, onSave, onCancel, weeklyHours}) {
+  const now = new Date().toISOString().split("T")[0];
+  const [date, setDate]       = useState(now);
+  const [endDate, setEndDate] = useState("");
+  const [useRange, setUseRange]= useState(false);
+  const [hours, setHours]     = useState("");
+  const [adjHours, setAdjHours]= useState("");
+  const [adjDir, setAdjDir]   = useState("add"); // "add" or "remove"
+  const [type, setType]       = useState("taken");
+  const [note, setNote]       = useState("");
+  const [err, setErr]         = useState("");
+  const dailyHours = r2((weeklyHours||40)/5);
+
+  useEffect(() => {
+    if (useRange && endDate && date && endDate>=date && type!=="adjustment")
+      setHours(String(r2(countWeekdays(date,endDate)*dailyHours)));
+  }, [useRange, date, endDate, dailyHours, type]);
+
+  function save() {
+    if (type==="adjustment") {
+      const hv = parseFloat(adjHours);
+      if (isNaN(hv) || hv<=0) { setErr("Enter a positive number of hours."); return; }
+      // add = negative adj (increases balance), remove = positive adj (decreases balance)
+      const signed = adjDir==="add" ? -hv : hv;
+      onSave({ date, hours:r2(signed), type:"adjustment", note, addedBy:"admin" });
+      return;
+    }
+    const hv = parseFloat(hours);
+    if (isNaN(hv) || hv<MIN_PTO_HOURS) { setErr(`Enter at least ${MIN_PTO_HOURS} hours.`); return; }
+    const entry = useRange && endDate && type!=="adjustment"
+      ? { date, endDate, hours:r2(hv), type, note, isRange:true, addedBy:"admin" }
+      : { date, hours:r2(hv), type, note, addedBy:"admin" };
+    onSave(entry);
+  }
+
+  const wkdCount = useRange&&date&&endDate&&endDate>=date ? countWeekdays(date,endDate) : 0;
+
+  return h('div', null,
+    h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12} },
+      ["taken","scheduled","adjustment"].map(t =>
+        h('button', {
+          key:t, onClick:()=>{setType(t);setErr("");},
+          style:{ padding:"10px 4px",borderRadius:10,fontSize:12,fontWeight:type===t?600:400,
+            background:type===t?(t==="taken"?C.amberDim:t==="scheduled"?C.greenDim:C.card2):C.card2,
+            border:type===t?`1.5px solid ${t==="taken"?C.amber:t==="scheduled"?C.green:C.accent}`:`1px solid ${C.border}`,
+            color:type===t?(t==="taken"?C.amberText:t==="scheduled"?C.greenText:C.accentText):C.textMid }
+        }, t==="taken"?"✓ Taken":t==="scheduled"?"⏰ Scheduled":"± Adjust")
+      )
+    ),
+    type!=="adjustment" && h('div', { style:{display:"flex",gap:8,marginBottom:14} },
+      h('button', { onClick:()=>{setUseRange(false);setEndDate("");},
+        style:{flex:1,padding:"8px 4px",borderRadius:9,fontSize:12,fontWeight:!useRange?600:400,
+          background:!useRange?C.card:"transparent",border:!useRange?`1px solid ${C.border}`:"1px solid transparent",color:!useRange?C.text:C.textMid} }, "Single day"),
+      h('button', { onClick:()=>setUseRange(true),
+        style:{flex:1,padding:"8px 4px",borderRadius:9,fontSize:12,fontWeight:useRange?600:400,
+          background:useRange?C.card:"transparent",border:useRange?`1px solid ${C.border}`:"1px solid transparent",color:useRange?C.text:C.textMid} }, "Date range")
+    ),
+    h('div', { style:{display:"grid",gridTemplateColumns:useRange&&type!=="adjustment"?"1fr 1fr":"1fr",gap:10} },
+      h(Field, { label:useRange&&type!=="adjustment"?"Start date":"Date" },
+        h('input', { type:"date", value:date, onChange:e=>setDate(e.target.value) })
+      ),
+      useRange && type!=="adjustment" && h(Field, { label:"End date", hint:"Weekdays only" },
+        h('input', { type:"date", value:endDate, min:date, onChange:e=>setEndDate(e.target.value) })
+      )
+    ),
+    useRange && wkdCount>0 && type!=="adjustment" &&
+      h('div', { style:{background:C.card2,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.textMid} },
+        `${wkdCount} weekday${wkdCount!==1?"s":""} × ${dailyHours}h = `,
+        h('strong', { style:{color:C.text} }, `${fmt(wkdCount*dailyHours)} hrs`)
+      ),
+    type==="adjustment"
+      ? h('div', null,
+          h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 12px"} }, "Adjust this employee\'s balance:"),
+          h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12} },
+            h('button', { onClick:()=>{setAdjDir("add");setErr("");},
+              style:{padding:"10px 8px",borderRadius:10,fontSize:12,fontWeight:adjDir==="add"?600:400,
+                background:adjDir==="add"?C.greenDim:"transparent",
+                border:adjDir==="add"?`1.5px solid ${C.green}`:`1px solid ${C.border}`,
+                color:adjDir==="add"?C.greenText:C.textMid} }, "➕ Add hours to balance"),
+            h('button', { onClick:()=>{setAdjDir("remove");setErr("");},
+              style:{padding:"10px 8px",borderRadius:10,fontSize:12,fontWeight:adjDir==="remove"?600:400,
+                background:adjDir==="remove"?C.redDim:"transparent",
+                border:adjDir==="remove"?`1.5px solid ${C.red}`:`1px solid ${C.border}`,
+                color:adjDir==="remove"?C.redText:C.textMid} }, "➖ Remove hours from balance")
+          ),
+          h(Field, { label:`Hours to ${adjDir==="add"?"add":"remove"}`, hint:"Enter a positive number" },
+            h('input', { type:"number", step:"0.01", min:"0", value:adjHours, onChange:e=>setAdjHours(e.target.value), placeholder:"e.g. 17.04" })
+          )
+        )
+      : h(Field, { label:"Hours", hint:useRange?"Auto-calculated — adjust if needed":"" },
+          h('input', { type:"number", step:"0.01", value:hours, onChange:e=>setHours(e.target.value), placeholder:"e.g. 8.00" })
+        ),
+    h(Field, { label:"Note (optional)" },
+      h('input', { value:note, onChange:e=>setNote(e.target.value), placeholder:"e.g. schedule change correction" })
+    ),
+    err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
+    h('div', { style:{display:"flex",gap:8} },
+      h('button', { className:"primary", onClick:save, style:{flex:2} }, "Save"),
+      h('button', { onClick:onCancel, style:{flex:1} }, "Cancel")
     )
   );
 }
@@ -1274,13 +1382,17 @@ function AdminScreen({staff: initialStaff, sessionPin, calcBalance, calcEOYBalan
                 h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 8px"} }, "Existing entries:"),
                 (emp.entries||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e =>
                   h('div', { key:e.id, style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:C.card2,borderRadius:8,marginBottom:4,fontSize:12} },
-                    h('span', { style:{color:C.text} }, `${e.date} · ${fmt(e.hours)}h · `, h('span', { style:{color:C.textMid} }, e.type), e.note?` · ${e.note}`:""),
-                    h('button', { className:"danger", onClick:()=>deleteEmpEntry(emp.name,e.id), style:{fontSize:11,padding:"2px 8px"} }, "×")
+                    h('span', { style:{color:C.text} }, `${e.date} · ${fmt(e.hours)}h · `, h('span', { style:{color:C.textMid} }, e.type), e.note?` · ${e.note}`:"",
+                      e.type==="adjustment" && e.addedBy==="admin" && h('span', { style:{color:C.textDim,marginLeft:4} }, "(read-only)")
+                    ),
+                    e.type==="adjustment" && e.addedBy==="admin"
+                      ? h('span', { style:{fontSize:11,color:C.textDim,padding:"2px 8px"} }, "—")
+                      : h('button', { className:"danger", onClick:()=>deleteEmpEntry(emp.name,e.id), style:{fontSize:11,padding:"2px 8px"} }, "×")
                   )
                 ),
                 h('div', { style:{borderTop:`1px solid ${C.border}`,marginTop:"1rem",paddingTop:"1rem"} },
                   h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 10px"} }, "Add new entry:"),
-                  h(EntryForm, { balance:calcBalance(emp), weeklyHours:emp.weeklyHours, onSave:d=>saveAdminEntry(emp.name,d), onCancel:()=>setAdjEmp(null) })
+                  h(AdminEntryForm, { balance:calcBalance(emp), weeklyHours:emp.weeklyHours, onSave:d=>saveAdminEntry(emp.name,d), onCancel:()=>setAdjEmp(null) })
                 )
               )
             : editing===emp.name
@@ -1400,7 +1512,7 @@ function App() {
       now=new Date(),
       taken=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&e.type==="taken"&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0),
       adj=(emp.entries||[]).filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
-    return (emp.rolloverHours||0)+acc-taken+adj;
+    return (emp.rolloverHours||0)+acc-taken-adj;
   };
 
   const calcEOYBalance = emp => {
@@ -1409,7 +1521,7 @@ function App() {
       acc=calcAccruedEOY(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null),
       allPTO=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&(e.type==="taken"||e.type==="scheduled")).reduce((a,e)=>a+e.hours,0),
       adj=(emp.entries||[]).filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
-    return (emp.rolloverHours||0)+acc-allPTO+adj;
+    return (emp.rolloverHours||0)+acc-allPTO-adj;
   };
 
   const calcNextRollover = emp => Math.min(Math.max(0, calcEOYBalance(emp)), ROLLOVER_CAP);
