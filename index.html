@@ -449,9 +449,13 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     if (type==="adjustment" && hv===0) { setErr("Adjustment cannot be zero."); return; }
     if (type!=="adjustment" && hv<MIN_PTO_HOURS) { setErr(`Minimum is ${MIN_PTO_HOURS} hours.`); return; }
     if (type==="taken" && hv>balance+0.001 && !initial) { setErr(`Exceeds available balance (${fmt(balance)} hrs).`); return; }
+    // For user adjustments, negate the stored value so the +adj formula works correctly:
+    // user enters +2 (took more) → store -2 → balance decreases by 2
+    // user enters -2 (took less) → store +2 → balance increases by 2
+    const storedHours = type==="adjustment" ? r2(-hv) : r2(hv);
     const entry = useRange && endDate && type!=="adjustment"
-      ? { date, endDate, hours:r2(hv), type, note, isRange:true }
-      : { date, hours:r2(hv), type, note };
+      ? { date, endDate, hours:storedHours, type, note, isRange:true }
+      : { date, hours:storedHours, type, note };
     onSave(entry);
   }
 
@@ -706,8 +710,14 @@ function HistoryView({emp, balance, onSave, onDelete}) {
                 h('div', null,
                   h('div', { style:{fontSize:14,fontWeight:500,color:e.isAccrual?C.textMid:C.text} },
                     e.isRange?`${e.date} → ${e.endDate}`:e.date, " — ",
-                    h('span', { style:{color:e.isAccrual?C.greenText:e.type==="adjustment"?(e.hours<0?C.red:C.green):e.type==="taken"?C.amberText:C.greenText} },
-                      `${e.hours>=0&&e.type==="adjustment"?"+":""}${fmt(e.hours)}h`)
+                    h('span', { style:{color:e.isAccrual?C.greenText:e.type==="adjustment"?(e.hours>0?C.red:C.green):e.type==="taken"?C.amberText:C.greenText} },
+                      (() => {
+                        if (e.type!=="adjustment") return `${fmt(e.hours)}h`;
+                        // User adjustments: display negated value (what they entered)
+                        // Admin adjustments: display stored value as-is
+                        const display = e.addedBy==="admin" ? e.hours : -e.hours;
+                        return `${display>0?"+":""}${fmt(display)}h`;
+                      })())
                   ),
                   e.note && h('div', { style:{fontSize:12,color:C.textMid,marginTop:2} }, e.note),
                   e.addedBy==="admin" && h('div', { style:{fontSize:11,color:C.accentText,marginTop:2} }, "Added by admin"),
