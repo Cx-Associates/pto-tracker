@@ -480,7 +480,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     ),
     h('div', { style:{display:"grid",gridTemplateColumns:useRange&&type!=="adjustment"?"1fr 1fr":"1fr",gap:10} },
       h(Field, { label:useRange&&type!=="adjustment"?"Start date":"Date" },
-        h('input', { type:"date", value:date, onChange:e=>setDate(e.target.value) })
+        h('input', { type:"date", value:date, max:type==="taken"?now:undefined, onChange:e=>setDate(e.target.value) })
       ),
       useRange && type!=="adjustment" && h(Field, { label:"End date", hint:"Weekdays only" },
         h('input', { type:"date", value:endDate, min:date, onChange:e=>setEndDate(e.target.value) })
