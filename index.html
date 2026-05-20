@@ -583,10 +583,8 @@ function ProjectedBalance({emp}) {
   const [projDate, setProjDate] = useState("");
   const now = new Date(), minDate = now.toISOString().split("T")[0];
   const pty = currentPTOYear(), entries = emp.entries||[];
-  const takenActual = entries.filter(e=>e.type==="taken"&&getPTOYear(e.date)===pty&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0);
-  const takenNegAdj = entries.filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty&&e.hours<0).reduce((a,e)=>a+Math.abs(e.hours),0);
-  const takenYTD = r2(takenActual + takenNegAdj);
   const adjTotal = entries.filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
+  const takenYTD = calcTakenYTD(emp);
 
   function calcProjected(targetDateStr) {
     if (!targetDateStr) return null;
@@ -594,8 +592,10 @@ function ProjectedBalance({emp}) {
     if (target<=now) return null;
     const start = new Date(pty,0,2);
     const projAcc = r2(((target-start)/(1000*60*60*24*7))*weeklyAccrual(emp.hireDate,emp.weeklyHours,emp.ptoOverride||null));
+    // All PTO up to target date (taken + scheduled, past and future up to target)
+    const allPTO = entries.filter(e=>(e.type==="taken"||e.type==="scheduled")&&getPTOYear(e.date)===pty&&new Date(e.date+"T12:00:00")<=target).reduce((a,e)=>a+e.hours,0);
     const scheduled = entries.filter(e=>e.type==="scheduled"&&new Date(e.date+"T12:00:00")>now&&new Date(e.date+"T12:00:00")<=target).reduce((a,e)=>a+e.hours,0);
-    return { balance:r2((emp.rolloverHours||0)+projAcc+adjTotal-takenActual-scheduled), accruedByThen:projAcc, scheduledBefore:r2(scheduled) };
+    return { balance:r2((emp.rolloverHours||0)+projAcc-allPTO+adjTotal), accruedByThen:projAcc, scheduledBefore:r2(scheduled) };
   }
 
   const proj = calcProjected(projDate);
@@ -1533,7 +1533,8 @@ function App() {
     const pty=currentPTOYear(),
       acc=calcAccruedInYear(emp.hireDate,emp.weeklyHours,pty,emp.ptoOverride||null),
       now=new Date(),
-      taken=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&e.type==="taken"&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0),
+      // Include both taken and past scheduled entries
+      taken=(emp.entries||[]).filter(e=>getPTOYear(e.date)===pty&&(e.type==="taken"||e.type==="scheduled")&&new Date(e.date+"T12:00:00")<=now).reduce((a,e)=>a+e.hours,0),
       adj=(emp.entries||[]).filter(e=>e.type==="adjustment"&&getPTOYear(e.date)===pty).reduce((a,e)=>a+e.hours,0);
     return (emp.rolloverHours||0)+acc-taken+adj;
   };
