@@ -153,15 +153,23 @@ function calcTakenYTD(emp) {
     getPTOYear(e.date)===pty &&
     new Date(e.date+"T12:00:00")<=now
   ).reduce((a,e)=>a+e.hours,0);
-  // Include user adjustments (not admin): stored as negated, so negative stored = positive user entry = more time taken
-  const adjTaken = (emp.entries||[]).filter(e =>
+  // Include user adjustments (stored negated): negative stored = user entered positive = took more time
+  const userAdjTaken = (emp.entries||[]).filter(e =>
     e.type==="adjustment" &&
     !e.addedBy &&
     getPTOYear(e.date)===pty &&
     new Date(e.date+"T12:00:00")<=now &&
-    e.hours<0  // stored negative = user entered positive = took more time
+    e.hours<0
   ).reduce((a,e)=>a+Math.abs(e.hours),0);
-  return r2(taken + adjTaken);
+  // Include admin negative adjustments (e.g. go-live imports) — these represent actual time taken
+  const adminAdjTaken = (emp.entries||[]).filter(e =>
+    e.type==="adjustment" &&
+    e.addedBy==="admin" &&
+    getPTOYear(e.date)===pty &&
+    new Date(e.date+"T12:00:00")<=now &&
+    e.hours<0
+  ).reduce((a,e)=>a+Math.abs(e.hours),0);
+  return r2(taken + userAdjTaken + adminAdjTaken);
 }
 
 // ─── Primitive UI helpers ─────────────────────────────────────────────────────
@@ -1405,7 +1413,7 @@ function AdminScreen({staff: initialStaff, sessionPin, calcBalance, calcEOYBalan
                 h('p', { style:{fontSize:12,color:C.textMid,margin:"0 0 8px"} }, "Existing entries:"),
                 (emp.entries||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e =>
                   h('div', { key:e.id, style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:C.card2,borderRadius:8,marginBottom:4,fontSize:12} },
-                    h('span', { style:{color:C.text} }, `${e.date} · ${fmt(e.hours)}h · `, h('span', { style:{color:C.textMid} }, e.type), e.note?` · ${e.note}`:"",
+                    h('span', { style:{color:C.text} }, `${e.date} · ${fmt(e.hours)}h · `, h('span', { style:{color:C.textMid} }, e.type==="scheduled"&&new Date(e.date+"T12:00:00")<=new Date()?"taken":e.type), e.note?` · ${e.note}`:"",
                       e.type==="adjustment" && e.addedBy==="admin" && h('span', { style:{color:C.textDim,marginLeft:4} }, "(read-only)")
                     ),
                     e.type==="adjustment" && e.addedBy==="admin"
