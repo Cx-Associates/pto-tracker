@@ -153,14 +153,15 @@ function calcTakenYTD(emp) {
     getPTOYear(e.date)===pty &&
     new Date(e.date+"T12:00:00")<=now
   ).reduce((a,e)=>a+e.hours,0);
-  // Include user adjustments (stored negated): negative stored = user entered positive = took more time
+  // User adjustments (stored negated):
+  // stored negative = user entered positive = took more → add to Taken YTD
+  // stored positive = user entered negative = took less → subtract from Taken YTD
   const userAdjTaken = (emp.entries||[]).filter(e =>
     e.type==="adjustment" &&
     !e.addedBy &&
     getPTOYear(e.date)===pty &&
-    new Date(e.date+"T12:00:00")<=now &&
-    e.hours<0
-  ).reduce((a,e)=>a+Math.abs(e.hours),0);
+    new Date(e.date+"T12:00:00")<=now
+  ).reduce((a,e)=>a + (-e.hours), 0); // negate stored value to get user-facing value
   // Include admin negative adjustments (e.g. go-live imports) — these represent actual time taken
   const adminAdjTaken = (emp.entries||[]).filter(e =>
     e.type==="adjustment" &&
@@ -1182,8 +1183,16 @@ function EmployeeScreen({emp: initialEmp, sessionPin, calcBalance, calcEOYBalanc
   function flash(m) { setMsg(m); setTimeout(()=>setMsg(""),5000); }
 
   async function persistEmp(updatedEmp) {
-    const res = await callApi("employee_save", { name:emp.name, pin:sessionPin, updatedEmp });
-    setEmp(res.emp);
+    // Update local state immediately so UI reflects changes without waiting for server
+    setEmp(updatedEmp);
+    // Then persist to server (fire and forget for UI purposes)
+    try {
+      const res = await callApi("employee_save", { name:emp.name, pin:sessionPin, updatedEmp });
+      // If server returns updated emp, use it; otherwise keep local update
+      if (res && res.emp) setEmp(res.emp);
+    } catch(e) {
+      console.error("persistEmp error:", e);
+    }
   }
 
   async function saveEntry(data, editId) {
