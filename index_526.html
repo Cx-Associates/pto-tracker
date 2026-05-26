@@ -153,14 +153,15 @@ function calcTakenYTD(emp) {
     getPTOYear(e.date)===pty &&
     new Date(e.date+"T12:00:00")<=now
   ).reduce((a,e)=>a+e.hours,0);
-  // Include user adjustments (stored negated): negative stored = user entered positive = took more time
+  // User adjustments (stored negated):
+  // stored negative = user entered positive = took more → add to Taken YTD
+  // stored positive = user entered negative = took less → subtract from Taken YTD
   const userAdjTaken = (emp.entries||[]).filter(e =>
     e.type==="adjustment" &&
     !e.addedBy &&
     getPTOYear(e.date)===pty &&
-    new Date(e.date+"T12:00:00")<=now &&
-    e.hours<0
-  ).reduce((a,e)=>a+Math.abs(e.hours),0);
+    new Date(e.date+"T12:00:00")<=now
+  ).reduce((a,e)=>a + (-e.hours), 0); // negate stored value to get user-facing value
   // Include admin negative adjustments (e.g. go-live imports) — these represent actual time taken
   const adminAdjTaken = (emp.entries||[]).filter(e =>
     e.type==="adjustment" &&
