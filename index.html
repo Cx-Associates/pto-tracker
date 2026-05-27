@@ -452,6 +452,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
   const [type, setType]     = useState(initial?.type || "taken");
   const [note, setNote]     = useState(initial?.note || "");
   const [err, setErr]       = useState("");
+  const [warn, setWarn]     = useState("");
 
   const dailyHours = r2((weeklyHours||40)/5);
 
@@ -465,7 +466,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     if (isNaN(hv)) { setErr("Enter valid hours."); return; }
     if (type==="adjustment" && hv===0) { setErr("Adjustment cannot be zero."); return; }
     if (type!=="adjustment" && hv<MIN_PTO_HOURS) { setErr(`Minimum is ${MIN_PTO_HOURS} hours.`); return; }
-    if (type==="taken" && hv>balance+0.001 && !initial) { setErr(`Exceeds available balance (${fmt(balance)} hrs).`); return; }
+    if (type==="taken" && hv>balance+0.001 && !initial) { setWarn(`⚠ This entry exceeds your available balance (${fmt(balance)} hrs). You can still save it.`); }
     // For user adjustments, negate the stored value so the +adj formula works correctly:
     // user enters +2 (took more) → store -2 → balance decreases by 2
     // user enters -2 (took less) → store +2 → balance increases by 2
@@ -529,6 +530,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     h(Field, { label:"Note (optional)" },
       h('input', { value:note, onChange:e=>setNote(e.target.value), placeholder:"e.g. vacation" })
     ),
+    warn && h('div', { style:{background:`${C.amber}18`,border:`1px solid ${C.amberDim}`,borderRadius:8,padding:"8px 12px",marginBottom:8} }, h('p', { style:{margin:0,fontSize:12,color:C.amberText} }, warn)),
     err && h('p', { style:{color:C.red,fontSize:13,margin:"0 0 8px"} }, err),
     h('div', { style:{display:"flex",gap:8} },
       h('button', { className:"primary", onClick:save, style:{flex:2} }, "Save"),
