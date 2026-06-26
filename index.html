@@ -473,7 +473,7 @@ function EntryForm({initial, balance, onSave, onCancel, weeklyHours}) {
     const storedHours = type==="adjustment" ? r2(-hv) : r2(hv);
     const entry = useRange && endDate && type!=="adjustment"
       ? { date, endDate, hours:storedHours, type, note, isRange:true }
-      : { date, hours:storedHours, type, note };
+      : { date, hours:storedHours, type, note, endDate:null, isRange:false };
     onSave(entry);
   }
 
@@ -899,7 +899,7 @@ function AdminEntryForm({balance, onSave, onCancel, weeklyHours}) {
     if (isNaN(hv) || hv<MIN_PTO_HOURS) { setErr(`Enter at least ${MIN_PTO_HOURS} hours.`); return; }
     const entry = useRange && endDate && type!=="adjustment"
       ? { date, endDate, hours:r2(hv), type, note, isRange:true, addedBy:"admin" }
-      : { date, hours:r2(hv), type, note, addedBy:"admin" };
+      : { date, hours:r2(hv), type, note, addedBy:"admin", endDate:null, isRange:false };
     onSave(entry);
   }
 
