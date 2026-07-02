@@ -30,7 +30,7 @@
 <body>
 <div id="root"></div>
 <script>
-// ─── Error boundary  ───── ──────────────────────────────────────────────────────
+// ─── Error boundary ───────────────────────────────────────────────────────────
 window.onerror = function(msg, src, line, col, err) {
   document.getElementById('root').innerHTML =
     '<div style="color:#ef4444;padding:2rem;font-family:monospace;font-size:14px;background:#0f1117;min-height:100vh">'
@@ -43,7 +43,7 @@ window.onerror = function(msg, src, line, col, err) {
 // ─── React destructure ────────────────────────────────────────────────────────
 const {createElement:h, useState, useEffect, useCallback, useMemo, Fragment} = React;
 
-// ─── Config  ───────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 const EDGE_FN_URL = "https://ykddpajaqftrcmmhizoq.supabase.co/functions/v1/smart-handler";
 const ANON_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlrZGRwYWphcWZ0cmNtbWhpem9xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNjE2MzAsImV4cCI6MjA5MTczNzYzMH0.Fot5HVwmNwg4tamCMJ13l8iC6Zj6VPMww_NHrdqpB9w";
 
@@ -982,9 +982,11 @@ function AuditReportView({staff}) {
   const [endDate,   setEndDate]   = useState(defaultEnd);
   const [selected,  setSelected]  = useState(staff.map(s=>s.name));
   const [generated, setGenerated] = useState(false);
+  const [expanded,  setExpanded]  = useState(new Set());
 
   function toggleAll() { setSelected(selected.length===staff.length ? [] : staff.map(s=>s.name)); }
   function toggleOne(name) { setSelected(s=>s.includes(name)?s.filter(x=>x!==name):[...s,name]); }
+  function toggleExpand(name) { setExpanded(prev => { const next = new Set(prev); next.has(name)?next.delete(name):next.add(name); return next; }); }
 
   const reportData = useMemo(() => {
     if (!startDate || !endDate) return [];
@@ -997,19 +999,27 @@ function AuditReportView({staff}) {
           if (e.type!=="taken" && e.type!=="scheduled") return false;
           const d = new Date(e.date+"T12:00:00");
           return d >= start && d <= end;
-        });
+        }).sort((a,b) => new Date(a.date+"T12:00:00") - new Date(b.date+"T12:00:00"));
         const totalHours = r2(entries.reduce((a,e)=>a+e.hours,0));
         const takenHours = r2(entries.filter(e=>e.type==="taken"||(e.type==="scheduled"&&new Date(e.date+"T12:00:00")<=now)).reduce((a,e)=>a+e.hours,0));
         const scheduledHours = r2(entries.filter(e=>e.type==="scheduled"&&new Date(e.date+"T12:00:00")>now).reduce((a,e)=>a+e.hours,0));
-        return { name:emp.name, lastName:lastName(emp.name), totalHours, takenHours, scheduledHours };
+        return { name:emp.name, lastName:lastName(emp.name), totalHours, takenHours, scheduledHours, entries };
       })
       .filter(r => r.totalHours > 0)
       .sort((a,b) => a.lastName.localeCompare(b.lastName));
   }, [staff, selected, startDate, endDate]);
 
   function exportCSV() {
-    const hdr = ["Name","Hours Taken","Hours Scheduled","Total Hours"];
-    const rows = reportData.map(r=>[r.name, r.takenHours, r.scheduledHours, r.totalHours]);
+    const hdr = ["Name","Date","End Date","Type","Hours","Note"];
+    const rows = [];
+    reportData.forEach(r => {
+      rows.push([r.name,"","","","Taken: "+fmt(r.takenHours)+" / Scheduled: "+fmt(r.scheduledHours)+" / Total: "+fmt(r.totalHours),""]);
+      r.entries.forEach(e => {
+        const displayType = e.type==="scheduled"&&new Date(e.date+"T12:00:00")<=now?"taken":e.type;
+        rows.push(["  "+r.name, e.date, e.endDate||"", displayType, fmt(e.hours), e.note||""]);
+      });
+    });
+    rows.push(["TOTAL","","","","",fmt(reportData.reduce((a,r)=>a+r.totalHours,0))]);
     const csv = [hdr,...rows].map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = "data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
@@ -1022,10 +1032,10 @@ function AuditReportView({staff}) {
 
   if (!generated) return h(Card, null,
     h('h3', { style:{margin:"0 0 1rem",fontSize:16,fontWeight:600} }, "Activity Report"),
-    h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Shows total PTO hours used per employee within a date range."),
+    h('p', { style:{fontSize:13,color:C.textMid,margin:"0 0 1rem"} }, "Shows total PTO hours per employee within a date range. Click any row to see individual entries."),
     h('div', { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:"1.25rem"} },
       h(Field, { label:"Start date" }, h('input', { type:"date", value:startDate, onChange:e=>setStartDate(e.target.value) })),
-      h(Field, { label:"End date" },   h('input', { type:"date", value:endDate,   min:startDate, onChange:e=>setEndDate(e.target.value) }))
+      h(Field, { label:"End date" },   h('input', { type:"date", value:endDate, min:startDate, onChange:e=>setEndDate(e.target.value) }))
     ),
     h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10} },
       h('span', { style:{fontSize:13,color:C.textMid} }, `${selected.length} of ${staff.length} selected`),
@@ -1051,7 +1061,7 @@ function AuditReportView({staff}) {
 
   return h('div', null,
     h('div', { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8} },
-      h('p', { style:{margin:0,fontSize:13,color:C.textMid} }, `${startDate} to ${endDate} · As of ${reportDateLabel}`),
+      h('p', { style:{margin:0,fontSize:13,color:C.textMid} }, `${startDate} to ${endDate} · As of ${reportDateLabel} · Click a row to expand`),
       h('div', { style:{display:"flex",gap:8} },
         h('button', { onClick:()=>setGenerated(false), style:{fontSize:12,padding:"6px 12px"} }, "← Edit"),
         h('button', { className:"primary", onClick:exportCSV, style:{fontSize:12,padding:"6px 12px"} }, "Export CSV")
@@ -1063,22 +1073,46 @@ function AuditReportView({staff}) {
           h('div', { style:{overflowX:"auto"} },
             h('table', { style:{width:"100%",borderCollapse:"collapse",fontSize:12} },
               h('thead', null, h('tr', { style:{background:C.card2} },
-                [["Employee","left"],["Taken","right"],["Scheduled","right"],["Total Hours","right"]].map(([lbl,align]) =>
-                  h('th', { key:lbl, style:{padding:"10px",textAlign:align,fontWeight:600,color:C.textMid,fontSize:10,
+                [["","left"],["Employee","left"],["Taken","right"],["Scheduled","right"],["Total Hours","right"]].map(([lbl,align]) =>
+                  h('th', { key:lbl||"expand", style:{padding:"10px",textAlign:align,fontWeight:600,color:C.textMid,fontSize:10,
                     whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:`1px solid ${C.border}`} }, lbl)
                 )
               )),
               h('tbody', null,
-                reportData.map((r,i) =>
-                  h('tr', { key:r.name, style:{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2} },
+                reportData.flatMap((r,i) => {
+                  const isExpanded = expanded.has(r.name);
+                  const rowBg = i%2===0?"transparent":C.card2;
+                  const summaryRow = h('tr', { key:r.name, onClick:()=>toggleExpand(r.name),
+                    style:{borderBottom:`1px solid ${C.border}`,background:rowBg,cursor:"pointer"} },
+                    h('td', { style:{padding:"10px",color:C.textDim,fontSize:14,width:20} }, isExpanded?"▾":"▸"),
                     h('td', { style:{padding:"10px",fontWeight:600,color:C.text,whiteSpace:"nowrap"} }, r.name),
                     h('td', { style:{padding:"10px",textAlign:"right",color:C.amberText} }, fmt(r.takenHours)),
                     h('td', { style:{padding:"10px",textAlign:"right",color:C.greenText} }, fmt(r.scheduledHours)),
                     h('td', { style:{padding:"10px",textAlign:"right",color:C.accentText,fontWeight:600} }, fmt(r.totalHours))
-                  )
-                )
+                  );
+                  if (!isExpanded) return [summaryRow];
+                  const detailRows = r.entries.map((e,j) => {
+                    const displayType = e.type==="scheduled"&&new Date(e.date+"T12:00:00")<=now?"taken":e.type;
+                    const dateLabel = e.isRange&&e.endDate ? `${e.date} → ${e.endDate}` : e.date;
+                    return h('tr', { key:`${r.name}-${e.id||j}`,
+                      style:{borderBottom:`1px solid ${C.border}`,background:`${C.accent}0a`} },
+                      h('td', { style:{padding:"6px 10px"} }),
+                      h('td', { style:{padding:"6px 10px",color:C.textMid,paddingLeft:24} },
+                        h('span', { style:{fontSize:11,marginRight:8,padding:"2px 6px",borderRadius:4,fontWeight:600,
+                          background:displayType==="taken"?`${C.amberDim}88`:C.greenDim,
+                          color:displayType==="taken"?C.amberText:C.greenText} }, displayType),
+                        dateLabel,
+                        e.note && h('span', { style:{color:C.textDim,marginLeft:6} }, `· ${e.note}`)
+                      ),
+                      h('td', { colSpan:2 }),
+                      h('td', { style:{padding:"6px 10px",textAlign:"right",color:C.text} }, fmt(e.hours)+"h")
+                    );
+                  });
+                  return [summaryRow, ...detailRows];
+                })
               ),
               h('tfoot', null, h('tr', { style:{borderTop:`2px solid ${C.border}`,background:C.card2} },
+                h('td'),
                 h('td', { style:{padding:"10px",fontSize:12,fontWeight:600,color:C.textMid} }, `Total (${reportData.length} employees)`),
                 h('td', { style:{padding:"10px",textAlign:"right",color:C.amberText,fontWeight:700} }, fmt(reportData.reduce((a,r)=>a+r.takenHours,0))),
                 h('td', { style:{padding:"10px",textAlign:"right",color:C.greenText,fontWeight:700} }, fmt(reportData.reduce((a,r)=>a+r.scheduledHours,0))),
