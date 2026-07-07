@@ -748,15 +748,17 @@ function HistoryView({emp, balance, onSave, onDelete}) {
                     color:e.isAccrual?C.greenText:(e.type==="taken"||(e.type==="scheduled"&&past))?C.amberText:e.type==="scheduled"?C.greenText:C.accentText} },
                     e.isAccrual?"accrual":(e.type==="scheduled"&&past)?"taken":e.type),
                   !e.isAccrual && h(Fragment, null,
-                    // Edit button: disabled with tooltip for past taken entries
+                    // Edit button: disabled with tooltip for past entries
                     past
                       ? h('div', { style:{position:"relative",display:"inline-block"} },
                           h('button', { className:"ghost", disabled:true,
                             style:{fontSize:11,padding:"3px 8px",opacity:.35,cursor:"not-allowed"},
                             title:"To modify past PTO, use ± Adjust when logging" }, "edit")
                         )
-                      : h('button', { className:"ghost", onClick:()=>setEditEntry(e), style:{fontSize:11,padding:"3px 8px"} }, "edit"),
-                    h('button', { className:"danger", onClick:()=>onDelete(e.id), style:{fontSize:11,padding:"3px 8px"} }, "×")
+                      : h(Fragment, null,
+                          h('button', { className:"ghost", onClick:()=>setEditEntry(e), style:{fontSize:11,padding:"3px 8px"} }, "edit"),
+                          h('span', { style:{fontSize:11,color:C.textDim,padding:"3px 4px"} }, "· To cancel, use ± Adjust")
+                        )
                   )
                 )
               )
